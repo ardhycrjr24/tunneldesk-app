@@ -47,6 +47,11 @@ warn_redundant_casts = true
 no_implicit_optional = true
 check_untyped_defs = true
 
+[[tool.mypy.overrides]]
+# pywin32 hanya terpasang di Windows (A-07); stubs tidak tersedia di macOS.
+module = ["win32api", "win32job", "win32process"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"

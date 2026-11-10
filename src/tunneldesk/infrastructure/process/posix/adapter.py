@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 import signal
 import subprocess
+import sys
 
 from tunneldesk.domain.tunnel.process_contracts import (
     LaunchedProcess,
@@ -31,6 +32,8 @@ class PosixProcessSession(BaseProcessSession):
         self._process.send_signal(signal.SIGTERM)
 
     def _force_kill(self) -> None:
+        if sys.platform == "win32":
+            raise RuntimeError("adapter POSIX hanya berjalan di POSIX")
         # SIGKILL ke seluruh process group agar child ikut mati (anti orphan).
         try:
             group_id = os.getpgid(self._process.pid)

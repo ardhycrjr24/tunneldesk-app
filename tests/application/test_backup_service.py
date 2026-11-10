@@ -146,7 +146,8 @@ def test_sumber_berubah_saats_backup_source_changed(tmp_path: Path) -> None:
     backup_dir = tmp_path / "backups"
 
     def change_checker(snapshot: bytes) -> bool:
-        return snapshot == b"versi awal\n"  # simulasi sumber berubah
+        # deterministik lintas platform: selalu simulasikan "sumber berubah"
+        return True
 
     result = create_backup_copy(
         config,

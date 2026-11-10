@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  lint-type-test:
+    name: Lint, type-check & tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]   # A-06: lint/unit lintas macOS & Windows
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python 3.12 (A-01)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install paket + tooling dev (A-14)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Ruff (lint)
+        run: ruff check src tests
+
+      - name: Mypy (type-check, target 3.12)
+        run: mypy src
+
+      - name: Import-linter (batas arsitektur A-08)
+        run: lint-imports
+
+      - name: Pytest
+        run: pytest

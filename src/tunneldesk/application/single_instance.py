@@ -166,16 +166,25 @@ def _default_process_alive(pid: int) -> bool:
 
 
 def _windows_process_alive(pid: int) -> bool:
-    """Cek hidup/matinya pid di Windows via pywin32 (lazy import)."""
+    """Cek hidup/matinya pid di Windows via pywin32 (lazy import).
+
+    Kebijakan konservatif: pid tidak valid (error 87) = tidak ada proses;
+    akses ditolak (error 5) = dianggap HIDUP agar lock aktif tidak
+    dicuri; kegagalan lain = tidak hidup."""
+    import pywintypes  # type: ignore[import-untyped]
     import win32api  # type: ignore[import-untyped]
     import win32con  # type: ignore[import-untyped]
     import win32event  # type: ignore[import-untyped]
 
-    handle = win32api.OpenProcess(
-        win32con.SYNCHRONIZE | win32con.PROCESS_QUERY_LIMITED_INFORMATION,
-        False,
-        pid,
-    )
+    try:
+        handle = win32api.OpenProcess(
+            win32con.SYNCHRONIZE | win32con.PROCESS_QUERY_LIMITED_INFORMATION,
+            False,
+            pid,
+        )
+    except pywintypes.error as exc:
+        winerror = getattr(exc, "winerror", None)
+        return winerror == 5  # akses ditolak → proses kemungkinan besar hidup
     if handle == 0:
         return False
     try:

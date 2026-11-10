@@ -50,6 +50,8 @@ class FakeScenario:
     force_kill_works: bool = True
     exits_with_code: int = 0
     spawns_child: bool = False
+    #: teks keluaran kustom (mis. simulasi `cloudflared --version`).
+    output_text: str = ""
 
 
 SCENARIO_NORMAL = FakeScenario(name="normal")
@@ -125,6 +127,8 @@ class FakeLaunchedProcess(LaunchedProcess):
             time.sleep(0.02)
 
     def output_lines(self) -> tuple[str, ...]:
+        if self.scenario.output_text:
+            return tuple(self.scenario.output_text.splitlines())
         return (
             f"INF fake tunnel mulai pid={self.pid_number}",
             "INF DUMMY-TOKEN-0123456789abcdef-FOR-REDACTION-TESTS-ONLY",

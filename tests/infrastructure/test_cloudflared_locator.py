@@ -9,6 +9,7 @@ import pytest
 from tunneldesk.domain.tunnel.detection import DetectionSource
 from tunneldesk.domain.tunnel.process_contracts import ProcessSpec
 from tunneldesk.infrastructure.detection.cloudflared_locator import (
+    _EXECUTABLE_NAME,
     CloudflaredLocator,
 )
 from tunneldesk.infrastructure.process.fake.fake import (
@@ -17,9 +18,10 @@ from tunneldesk.infrastructure.process.fake.fake import (
 )
 
 
-def make_executable(directory: Path, name: str = "cloudflared") -> Path:
+def make_executable(directory: Path, name: str | None = None) -> Path:
+    """Buat file executable tiruan dengan nama sesuai platform (E-5)."""
     directory.mkdir(parents=True, exist_ok=True)
-    exe = directory / name
+    exe = directory / (name or _EXECUTABLE_NAME)
     exe.write_text("#!/bin/sh\necho ok\n", encoding="utf-8")
     if sys.platform != "win32":
         exe.chmod(0o755)

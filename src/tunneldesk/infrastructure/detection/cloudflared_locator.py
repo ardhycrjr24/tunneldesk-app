@@ -96,11 +96,13 @@ class CloudflaredLocator:
             candidate = directory / _EXECUTABLE_NAME
             if not candidate.is_file():
                 continue
+            version_info = self._probe_version(candidate)
             findings.append(
                 ExecutableFinding(
                     path=candidate.resolve(),
                     source=source,
-                    **self._probe_version(candidate),
+                    version=version_info["version"],
+                    version_detail=version_info["version_detail"] or "",
                 )
             )
         return self._dedupe(findings)

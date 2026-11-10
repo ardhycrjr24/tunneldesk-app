@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Protocol
 
 from tunneldesk.domain.redaction.engine import RedactionEngine
 
@@ -70,7 +71,7 @@ class ProcessResult:
     forced: bool = False
 
 
-class LaunchedProcess:
+class LaunchedProcess(Protocol):
     """Port: proses hidup yang dilahirkan oleh launcher milik aplikasi.
 
     Implementasi: adapter POSIX, adapter Windows, dan fake-cloudflared.
@@ -78,30 +79,30 @@ class LaunchedProcess:
     """
 
     def pid(self) -> int:
-        raise NotImplementedError
+        ...
 
     def poll(self) -> int | None:
         """Kembalikan exit code bila proses sudah berakhir, selain itu None."""
-        raise NotImplementedError
+        ...
 
     def graceful_stop(self) -> None:
         """Kirim sinyal penghentian terkendali (SIGTERM / CTRL_BREAK)."""
-        raise NotImplementedError
+        ...
 
     def force_kill(self) -> None:
         """Hentikan paksa proses (dan grup/Job Object miliknya)."""
-        raise NotImplementedError
+        ...
 
     def wait(self, timeout_seconds: float) -> int | None:
         """Tunggu sampai berakhir; None bila timeout tercapai."""
-        raise NotImplementedError
+        ...
 
     def output_lines(self) -> tuple[str, ...]:
-        """Baris keluaran terbaru (terdedyupasi, terbatas buffer)."""
-        raise NotImplementedError
+        """Baris keluaran terbaru (teredaksi, terbatas buffer)."""
+        ...
 
 
-class ProcessLauncher:
+class ProcessLauncher(Protocol):
     """Port: melahirkan proses baru dari :class:`ProcessSpec`.
 
     Implementasi wajib memastikan proses yang dilahirkan tercatat sebagai
@@ -109,4 +110,4 @@ class ProcessLauncher:
     """
 
     def launch(self, spec: ProcessSpec) -> LaunchedProcess:
-        raise NotImplementedError
+        ...

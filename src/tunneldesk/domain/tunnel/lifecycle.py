@@ -79,6 +79,11 @@ class ProcessLifecycle:
         with self._lock:
             return self._last_result
 
+    def current_pid(self) -> int | None:
+        """Pid proses yang sedang dikelola; None bila tidak ada."""
+        with self._lock:
+            return self._process.pid() if self._process is not None else None
+
     def owned_pids(self) -> frozenset[int]:
         with self._lock:
             return self._ownership.owned_pids()

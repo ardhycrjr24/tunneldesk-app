@@ -1,0 +1,7 @@
+# F8b — nama file non-ASCII (uji path handling, PRD-02 §3.4)
+tunnel: 88888888-8888-8888-8888-888888888888
+credentials-file: ../F6/credentials-dummy.json
+ingress:
+  - hostname: unicode.example.com
+    service: http://localhost:8080
+  - service: http_status:404

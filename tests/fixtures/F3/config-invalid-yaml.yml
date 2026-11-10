@@ -1,0 +1,7 @@
+# F3 — sintaks YAML rusak (harus ditolak dengan pesan yang dapat
+# ditindaklanjuti; perubahan tidak boleh diterapkan)
+tunnel: 11111111-2222-3333-4444-555555555555
+credentials-file: [../F6/credentials-dummy.json
+ingress:
+  - hostname: aplikasi-sekolah.example.com
+   service: http://localhost:8080   # indentasi salah

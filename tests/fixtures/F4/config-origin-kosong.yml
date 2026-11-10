@@ -1,0 +1,7 @@
+# F4b — service origin kosong pada ingress pertama
+tunnel: 33333333-3333-3333-3333-333333333333
+credentials-file: ../F6/credentials-dummy.json
+ingress:
+  - hostname: rapor.example.com
+    service:
+  - service: http_status:404

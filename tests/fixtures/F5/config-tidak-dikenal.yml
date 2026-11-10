@@ -1,0 +1,10 @@
+# F5 — struktur di luar skema yang dikenali aplikasi
+# Harus TIDAK diubah otomatis: tampilkan alasan + saran tindakan manual.
+tunnel: 66666666-6666-6666-6666-666666666666
+warp-routing:
+  enabled: true
+ingress:
+  - service: http://localhost:9999
+  - service: http_status:404
+original-config-extra:
+  fitur-eksperimen: benar

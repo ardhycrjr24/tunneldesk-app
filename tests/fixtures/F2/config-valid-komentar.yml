@@ -1,0 +1,18 @@
+# F2 — F1 + komentar dan format tak beraturan
+# Tujuan: memastikan round-trip (A-02) mempertahankan komentar/format
+# pengguna sejauh didukung library, dan diff preview tetap jujur.
+
+   # indentasi komentar sengaja tidak rapi
+tunnel:      99999999-8888-7777-6666-555555555555   # tunnel ID dummy sekolah contoh
+
+credentials-file:  ../F6/credentials-dummy.json
+
+ingress:
+  # ingress pertama — aplikasi rapor lokal (port dummy)
+  - hostname: rapor-sekolah-contoh.example.com
+    service: http://localhost:8443
+    originRequest:
+            connectTimeout: 30
+
+  # catch-all
+  - service: http_status:404

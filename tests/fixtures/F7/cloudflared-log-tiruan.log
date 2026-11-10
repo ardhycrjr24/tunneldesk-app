@@ -1,0 +1,11 @@
+# F7 — log cloudflared tiruan (semua ID/IP/hostname dummy; IP memakai
+# rentang dokumentasi RFC 5737 192.0.2.x)
+2026-11-11T08:00:00Z INF Starting tunnel tunnelID=11111111-2222-3333-4444-555555555555
+2026-11-11T08:00:01Z INF Initiating graceful shutdown due to signal terminated ...
+2026-11-11T08:00:02Z INF Connection registered connIndex=0 ip=192.0.2.10 location=SIN
+2026-11-11T08:00:02Z INF Connection registered connIndex=1 ip=192.0.2.11 location=CGK
+2026-11-11T08:00:03Z ERR Failed to serve tunnel connection error="dial tcp 127.0.0.1:8080: connect: connection refused"
+2026-11-11T08:00:04Z INF Registered tunnel connection connIndex=2 ip=192.0.2.12 location=SIN protocol=http2
+2026-11-11T08:00:05Z WRN Retrying connection in 1s connIndex=3 error="dial tcp: lookup region1.v2.argotunnel.com: no such host"
+2026-11-11T08:00:06Z INF Updated to new configuration config="{\"ingress\":[{\"hostname\":\"aplikasi-sekolah.example.com\",\"service\":\"http://localhost:8080\"}]}"
+2026-11-11T08:00:07Z ERR Tunnel exit code 1: proses contoh berakhir dengan kegagalan (simulasi)

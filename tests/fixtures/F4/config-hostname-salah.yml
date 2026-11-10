@@ -1,0 +1,7 @@
+# F4d — hostname salah format
+tunnel: 55555555-5555-5555-5555-555555555555
+credentials-file: ../F6/credentials-dummy.json
+ingress:
+  - hostname: bukan_hostname_valid
+    service: http://localhost:8080
+  - service: http_status:404

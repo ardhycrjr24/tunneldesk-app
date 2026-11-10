@@ -1,0 +1,7 @@
+# F8a — jalur dengan spasi (uji path handling Windows, PRD-02 §3.4)
+tunnel: 77777777-7777-7777-7777-777777777777
+credentials-file: ../F6/credentials-dummy.json
+ingress:
+  - hostname: spasi.example.com
+    service: http://localhost:8080
+  - service: http_status:404

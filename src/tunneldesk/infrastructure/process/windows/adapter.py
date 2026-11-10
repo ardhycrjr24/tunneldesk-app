@@ -77,6 +77,7 @@ def _assign_to_job_object(process: subprocess.Popen[bytes]) -> object:
     """
     # Impor lazy: modul hanya dieksekusi di Windows.
     import win32api  # type: ignore[import-untyped]
+    import win32con  # type: ignore[import-untyped]
     import win32job  # type: ignore[import-untyped]
 
     job = win32job.CreateJobObject(None, "")
@@ -90,7 +91,7 @@ def _assign_to_job_object(process: subprocess.Popen[bytes]) -> object:
         job, win32job.JobObjectExtendedLimitInformation, extended
     )
     process_handle = win32api.OpenProcess(
-        win32job.PROCESS_SET_QUOTA | win32job.PROCESS_TERMINATE,
+        win32con.PROCESS_SET_QUOTA | win32con.PROCESS_TERMINATE,
         False,
         process.pid,
     )

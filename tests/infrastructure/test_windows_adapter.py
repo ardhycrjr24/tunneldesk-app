@@ -85,5 +85,7 @@ def test_exit_code_ditangkap() -> None:
 
 def test_assign_menolak_pid_tidak_valid() -> None:
     """pid tak valid → OpenProcess gagal → error (bukan dibungkam)."""
-    with pytest.raises(OSError):
+    import pywintypes  # type: ignore[import-untyped]
+
+    with pytest.raises((OSError, pywintypes.error)):
         _assign_to_job_object(type("FakePopen", (), {"pid": 4294967295})())

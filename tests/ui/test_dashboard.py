@@ -207,8 +207,12 @@ def test_problems_muncul_saat_origin_unreachable(
         OriginProbeOutcome(OriginProbeKind.REFUSED)
     )
     window._origin_button.click()
+    # UNREACHABLE (REFUSED di POSIX, REFUSED/TIMEOUT di Windows) selalu
+    # muncul sebagai ringkasan masalah berawalan "Origin:".
     qtbot.waitUntil(
-        lambda: "ditolak" in window.problems_text(), timeout=3000
+        lambda: strings.text("dash.problem_none") != window.problems_text()
+        and "Origin:" in window.problems_text(),
+        timeout=3000,
     )
 
 

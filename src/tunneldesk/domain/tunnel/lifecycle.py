@@ -17,6 +17,7 @@ Kontrak idempoten (PRD-02 §3.1):
 from __future__ import annotations
 
 import threading
+import time
 
 from .ownership import OwnershipRegistry
 from .process_contracts import (
@@ -64,6 +65,7 @@ class ProcessLifecycle:
         self._lock = threading.RLock()
         self._process: LaunchedProcess | None = None
         self._last_result: ProcessResult | None = None
+        self._started_at: float | None = None
 
     # ------------------------------------------------------------------
     # Properti status
@@ -83,6 +85,21 @@ class ProcessLifecycle:
         """Pid proses yang sedang dikelola; None bila tidak ada."""
         with self._lock:
             return self._process.pid() if self._process is not None else None
+
+    @property
+    def started_at(self) -> float | None:
+        """Epoch detik saat proses terakhir terkonfirmasi berjalan (STARTED)."""
+        with self._lock:
+            return self._started_at
+
+    def recent_output(self) -> tuple[str, ...]:
+        """Baris keluaran proses terakhir (teredaksi) — untuk dashboard."""
+        with self._lock:
+            return (
+                self._process.output_lines()
+                if self._process is not None
+                else ()
+            )
 
     def owned_pids(self) -> frozenset[int]:
         with self._lock:
@@ -124,6 +141,7 @@ class ProcessLifecycle:
                 )
                 raise ProcessStartError(exit_code)
             self._machine.transition(TunnelEvent.STARTED)
+            self._started_at = time.time()
             return process
 
     # ------------------------------------------------------------------

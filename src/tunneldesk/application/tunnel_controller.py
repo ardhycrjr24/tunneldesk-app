@@ -146,6 +146,14 @@ class TunnelController:
         """Deteksi exit tak terduga; state → ERROR bila crash (lazy)."""
         return self._lifecycle.poll_exit()
 
+    def recent_output(self) -> tuple[str, ...]:
+        """Baris keluaran proses terakhir (teredaksi) — untuk tampilan log."""
+        return self._lifecycle.recent_output()
+
+    def started_at(self) -> float | None:
+        """Epoch detik saat proses terakhir terkonfirmasi berjalan."""
+        return self._lifecycle.started_at
+
     def shutdown(self) -> None:
         """Cleanup saat aplikasi ditutup (idempoten — kontrak E-2)."""
         self._lifecycle.cleanup_after_parent_shutdown()

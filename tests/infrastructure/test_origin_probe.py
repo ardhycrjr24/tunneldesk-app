@@ -59,10 +59,15 @@ def test_origin_reachable_http_200() -> None:
         server.close()
 
 
-def test_origin_refused_port_tertutup() -> None:
+def test_origin_port_tertutup_refused_atau_timeout() -> None:
+    """Port tertutup: Windows dapat melaporkan REFUSED maupun TIMEOUT
+    (perilaku stack jaringan). Keduanya terklasifikasi UNREACHABLE."""
     port = _free_port()  # port ditutup — tidak ada listener
     hasil = PROBE.probe(OriginTarget(host="127.0.0.1", port=port), 2.0)
-    assert hasil.kind is OriginProbeKind.REFUSED
+    assert hasil.kind in (
+        OriginProbeKind.REFUSED,
+        OriginProbeKind.TIMEOUT,
+    )
 
 
 def test_origin_timeout_tanpa_respons() -> None:

@@ -1,0 +1,21 @@
+[importlinter]
+root_packages =
+    tunneldesk
+
+[importlinter:contract:layers]
+name = UI di atas application di atas domain (A-08, Ports & Adapters pragmatis)
+type = layers
+layers =
+    tunneldesk.ui
+    tunneldesk.application
+    tunneldesk.domain
+
+[importlinter:contract:domain-purity]
+name = Domain bebas dari infrastructure, UI, dan application (D-01/D-06; uji domain di macOS)
+type = forbidden
+source_modules =
+    tunneldesk.domain
+forbidden_modules =
+    tunneldesk.infrastructure
+    tunneldesk.ui
+    tunneldesk.application

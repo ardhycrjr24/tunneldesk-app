@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tunneldesk"
+version = "0.0.1"
+description = "TunnelDesk — pendamping Cloudflare Tunnel untuk operator sekolah (Windows MVP). Skeleton Fase 0: struktur tanpa implementasi fitur."
+readme = "README.md"
+requires-python = ">=3.12"          # A-01: Python 3.12 dipin; 3.11 hanya fallback bila blocker terbukti
+license = { text = "Proprietary" }
+authors = [{ name = "ANAK TERUBUK Dev" }]
+
+dependencies = [
+    "PySide6>=6.7",                          # D-01 (GUI) — tidak diimpor oleh domain (A-08)
+    "ruamel.yaml>=0.18",                     # A-02 (round-trip YAML)
+    "cryptography>=42",                      # A-03 (Ed25519 verifikasi lisensi)
+    "pywin32>=306 ; sys_platform == 'win32'" # A-07 (Job Object; Windows-only)
+    # CATATAN A-04: `keyring` TIDAK ditambahkan — persetujuan bersyarat,
+    # dependensi hanya boleh ada bila kebutuhan secret lokal terbukti (D-04).
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-qt>=4.4",
+    "ruff>=0.6",
+    "mypy>=1.10",
+    "import-linter>=2.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.12"
+warn_unused_configs = true
+warn_redundant_casts = true
+no_implicit_optional = true
+check_untyped_defs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+# Kontrak import-linter (A-08) ada di file .importlinter (format INI).

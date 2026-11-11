@@ -249,13 +249,20 @@ def test_t3_windows_nama_pendek_83_ditolak() -> None:
     if panjang == 0 or buf.value == "C:\\Program Files":
         pytest.skip("nama-pendek 8.3 tidak aktif pada volume runner")
     # Prekondisi jujur: mekanisme kanonis hanya dapat diverifikasi via 8.3
-    # bila realpath runner ini benar-benar menyelesaikan nama pendek.
+    # bila realpath runner ini benar-benar MENYELESAIKAN nama pendek —
+    # bentuk extended-length (\\?\...) tanpa resolusi tidak dihitung
+    # (pelajaran run 43114749697: kebandingan normcase saja tertipu).
     import ntpath
-    import os as _os
+
+    from tunneldesk.infrastructure.config_io.path_policy import (
+        _normalized_windows_string,
+    )
 
     asli = buf.value + "\\audit.yml"
-    resolusi = ntpath.realpath(asli)
-    if _os.path.normcase(resolusi) == _os.path.normcase(asli):
+    panjang_jujur = "C:\\Program Files\\audit.yml"
+    if _normalized_windows_string(Path(ntpath.realpath(asli))) != (
+        _normalized_windows_string(Path(panjang_jujur))
+    ):
         pytest.skip(
             "realpath tidak menyelesaikan 8.3 pada runner ini — "
             "verifikasi kanonis 8.3 tidak memungkinkan (NOT VERIFIED)"

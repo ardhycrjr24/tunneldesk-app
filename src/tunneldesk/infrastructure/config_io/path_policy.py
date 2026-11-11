@@ -151,9 +151,20 @@ def _windows_canonical_prefixes() -> tuple[str, ...]:
 
 
 def _normalized_windows_string(path: Path) -> str:
-    """Bentuk kanonis pembanding Windows: backslash + huruf kecil,
-    berakhiran pemisah agar cocok berbatas komponen."""
-    return str(path).replace("/", "\\").rstrip("\\").lower() + "\\"
+    r"""Bentuk kanonis pembanding Windows: backslash + huruf kecil,
+    berakhiran pemisah agar cocok berbatas komponen.
+
+    Prefix extended-length dari ``ntpath.realpath`` dilucuti (pelajaran
+    CI Windows: ``\\?\C:\...`` tidak pernah cocok prefiks biasa):
+    ``\\?\UNC\server\share`` → ``\\server\share``; ``\\?\C:\...``
+    → ``C:\...``.
+    """
+    text = str(path)
+    if text.startswith("\\\\?\\UNC\\"):
+        text = "\\\\" + text[8:]
+    elif text.startswith("\\\\?\\"):
+        text = text[4:]
+    return text.replace("/", "\\").rstrip("\\").lower() + "\\"
 
 
 def _reject_system_directory(target: Path, platform: str) -> bool:

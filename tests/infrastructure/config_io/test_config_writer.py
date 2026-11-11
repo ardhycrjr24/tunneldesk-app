@@ -120,9 +120,15 @@ def test_gagal_verifikasi_temp_target_utuh(
     target = tmp_path / "config.yml"
     target.write_bytes(DATA)
     writer = AtomicConfigFileWriter()
+    # Jalur dir_fd memakai _sha256_of_handle; fallback memakai
+    # file_sha256_hex — keduanya dipatch agar uji portabel di semua OS.
     monkeypatch.setattr(
         "tunneldesk.infrastructure.config_io.config_writer._sha256_of_handle",
         lambda handle: "0" * 64,  # hash palsu ≠ hash data → verifikasi gagal
+    )
+    monkeypatch.setattr(
+        "tunneldesk.infrastructure.config_io.config_writer.file_sha256_hex",
+        lambda path: "0" * 64,
     )
     with pytest.raises(OSError):
         writer.write_config_bytes(target, DATA)
@@ -280,17 +286,23 @@ def test_writer_path_non_regular_ditolak(tmp_path: Path) -> None:
 # ----------------------------------------------------------------------
 # T-1 (koreksi audit) — adversarial parent-swap TOCTOU, deterministik
 # ----------------------------------------------------------------------
-def _tukar_parent_ke_terlarang(target: Path, terlarang: Path) -> None:
-    """Simulasi penyerang: tukar direktori induk menjadi symlink ke
-    direktori terlarang (skenario asli eksperimen audit 1).
+def _tukar_parent_ke_terlarang(
+    target: Path, terlarang: Path, pakai_symlink: bool
+) -> None:
+    """Simulasi penyerang: tukar direktori induk menjadi path LAIN
+    (skenario asli eksperimen audit 1).
 
     Berbasis rename agar bekerja meski direktori masih berisi file (mis.
-    file temp yang belum direname): inode asli tetap ada di lokasi baru,
-    path lama kini menunjuk direktori terlarang.
+    file temp yang belum direname): inode asli pindah, path lama menunjuk
+    lokasi berbeda — ``pakai_symlink`` menentukan bentuk penggantinya
+    (symlink hanya di POSIX; pembuatannya butuh hak khusus di Windows).
     """
     moved = target.parent.with_name(target.parent.name + "-dipindah")
     os.rename(target.parent, moved)
-    target.parent.symlink_to(terlarang)
+    if pakai_symlink:
+        target.parent.symlink_to(terlarang)
+    else:
+        target.parent.mkdir()  # direktori polos — identitas inode berubah
 
 
 @pytest.fixture()
@@ -326,7 +338,7 @@ def test_t1_parent_swap_setelah_validasi_ditolak(
     def validate_lalu_tukar(t: Path, **kwargs: object):
         result = real_validate(t, **kwargs)  # validasi SAH (sebelum tukar)
         if result.ok:
-            _tukar_parent_ke_terlarang(target, terlarang)
+            _tukar_parent_ke_terlarang(target, terlarang, pakai_symlink=True)
         return result
 
     monkeypatch.setattr(cw, "validate_config_write_path", validate_lalu_tukar)
@@ -347,7 +359,7 @@ def test_t1_dir_fd_mengikat_tulisan_ke_direktori_tervalidasi(
 
     def replace_lalu_tukar(*args: object, **kwargs: object):
         if not target.parent.is_symlink():
-            _tukar_parent_ke_terlarang(target, terlarang)
+            _tukar_parent_ke_terlarang(target, terlarang, pakai_symlink=True)
         return real_replace(*args, **kwargs)  # dir_fd → inode tervalidasi
 
     monkeypatch.setattr(os, "replace", replace_lalu_tukar)
@@ -370,7 +382,7 @@ def test_t1_fallback_penjaga_identitas_menolak(
     def validate_lalu_tukar(t: Path, **kwargs: object):
         result = real_validate(t, **kwargs)
         if result.ok:
-            _tukar_parent_ke_terlarang(target, terlarang)
+            _tukar_parent_ke_terlarang(target, terlarang, pakai_symlink=False)
         return result
 
     monkeypatch.setattr(cw, "validate_config_write_path", validate_lalu_tukar)
@@ -390,8 +402,8 @@ def test_t1_fallback_temp_di_direktori_tukar_dibersihkan(
     real_mkstemp = tempfile.mkstemp
 
     def mkstemp_lalu_tukar(*args: object, **kwargs: object):
-        _tukar_parent_ke_terlarang(target, terlarang)
-        return real_mkstemp(*args, **kwargs)  # temp tercipta di terlarang
+        _tukar_parent_ke_terlarang(target, terlarang, pakai_symlink=False)
+        return real_mkstemp(*args, **kwargs)  # temp tercipta di dir baru
 
     monkeypatch.setattr(tempfile, "mkstemp", mkstemp_lalu_tukar)
     with pytest.raises(OSError, match="berubah selama penulisan"):

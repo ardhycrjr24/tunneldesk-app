@@ -87,10 +87,10 @@ def make_config(
     """Config + credential dummy (validator E-6 memeriksa keberadaan
     credentials-file secara sadar-credential — isi tidak pernah dibaca)."""
     target = tmp_path / "config.yml"
-    target.write_text(content, encoding="utf-8")
+    target.write_bytes(content.encode("utf-8"))
     if with_credentials:
-        (tmp_path / "credentials-dummy.json").write_text(
-            '{"TunnelSecret": "' + DUMMY_TOKEN + '"}', encoding="utf-8"
+        (tmp_path / "credentials-dummy.json").write_bytes(
+            ('{"TunnelSecret": "' + DUMMY_TOKEN + '"}').encode("utf-8")
         )
     return target
 
@@ -271,7 +271,7 @@ def test_apply_sukses_byte_persis_artefak(tmp_path: Path) -> None:
 def test_apply_stale_artefak_ditolak(tmp_path: Path) -> None:
     target = make_config(tmp_path)
     artifact = make_artifact(tmp_path, target=target)
-    target.write_text(ORIGINAL + "# diubah eksternal\n", encoding="utf-8")
+    target.write_bytes((ORIGINAL + "# diubah eksternal\n").encode("utf-8"))
     service = make_service(tmp_path)
     outcome = service.apply(artifact, confirm=True)
     assert outcome.status is ApplyStatus.SOURCE_CHANGED
@@ -291,7 +291,7 @@ def test_apply_file_hilang_setelah_prepare_ditolak(tmp_path: Path) -> None:
 def test_apply_target_terganti_file_lain_ditolak(tmp_path: Path) -> None:
     target = make_config(tmp_path)
     artifact = make_artifact(tmp_path, target=target)
-    target.write_text(ORIGINAL.replace("404", "503"), encoding="utf-8")
+    target.write_bytes(ORIGINAL.replace("404", "503").encode("utf-8"))
     service = make_service(tmp_path)
     outcome = service.apply(artifact, confirm=True)
     assert outcome.status is ApplyStatus.SOURCE_CHANGED
@@ -301,7 +301,7 @@ def test_apply_path_ditolak_tanpa_tulis(tmp_path: Path) -> None:
     dilarang = tmp_path / "dilarang"
     dilarang.mkdir()
     target = dilarang / "config.yml"
-    target.write_text(ORIGINAL, encoding="utf-8")
+    target.write_bytes(ORIGINAL.encode("utf-8"))
     artifact = make_artifact(tmp_path, target=target)
     service = make_service(tmp_path)
     outcome = service.apply(artifact, confirm=True)
@@ -578,7 +578,7 @@ def test_restore_dengan_writer_nyata_aktif(tmp_path: Path) -> None:
     backup_service = make_backup_service(tmp_path, AtomicConfigFileWriter())
     created = backup_service.create_backup(target, "manual")
     assert created.ok and created.backup_id is not None
-    target.write_text(PROPOSED, encoding="utf-8")  # kondisi terkini lain
+    target.write_bytes(PROPOSED.encode("utf-8"))  # kondisi terkini lain
     outcome = backup_service.restore(created.backup_id, target, confirm=True)
     assert outcome.status is RestoreStatus.RESTORED
     assert outcome.copied is True
@@ -593,7 +593,7 @@ def test_restore_backup_pra_restore_target_dibuat(tmp_path: Path) -> None:
     backup_service = make_backup_service(tmp_path, AtomicConfigFileWriter())
     sumber = backup_service.create_backup(target, "manual")
     assert sumber.ok and sumber.backup_id is not None
-    target.write_text(ORIGINAL + "# versi lain\n", encoding="utf-8")
+    target.write_bytes((ORIGINAL + "# versi lain\n").encode("utf-8"))
     outcome = backup_service.restore(sumber.backup_id, target, confirm=True)
     assert outcome.status is RestoreStatus.RESTORED
     assert outcome.pre_restore_backup_path is not None
@@ -630,7 +630,7 @@ def test_restore_backup_pra_restore_gagal_memblokir(
     backup_service = make_backup_service(tmp_path, AtomicConfigFileWriter())
     sumber = backup_service.create_backup(target, "manual")
     assert sumber.ok and sumber.backup_id is not None
-    target.write_text(ORIGINAL + "# versi lain\n", encoding="utf-8")
+    target.write_bytes((ORIGINAL + "# versi lain\n").encode("utf-8"))
 
     asli_create = BackupService.create_backup
 
@@ -669,7 +669,7 @@ def test_restore_pra_restore_bukan_rekursi(tmp_path: Path) -> None:
     backup_service = make_backup_service(tmp_path, AtomicConfigFileWriter())
     sumber = backup_service.create_backup(target, "manual")
     assert sumber.backup_id is not None
-    target.write_text(ORIGINAL + "# x\n", encoding="utf-8")
+    target.write_bytes((ORIGINAL + "# x\n").encode("utf-8"))
     outcome = backup_service.restore(sumber.backup_id, target, confirm=True)
     assert outcome.status is RestoreStatus.RESTORED
     assert len(backup_service.list_backups()) == 2

@@ -419,3 +419,126 @@ def test_backup_filename_format_dan_kolisi() -> None:
 def test_backup_copy_status_enum_lengkap() -> None:
     assert BackupCopyStatus.SOURCE_CHANGED is not None
     assert BackupCopyStatus.WRITE_ERROR is not None
+
+
+# ----------------------------------------------------------------------
+# T-2 (koreksi audit) — kebijakan path Q3b SAMA di jalur restore
+# ----------------------------------------------------------------------
+def test_restore_path_policy_ditolak_direktori_data(tmp_path: Path) -> None:
+    """Regresi eksperimen audit 4: target di dalam direktori data
+    aplikasi (deny-prefix) DITOLAK di jalur restore — sebelum backup
+    pra-restore dan sebelum tulis; target utuh."""
+    data_dir = tmp_path / "data-tunneldesk"
+    data_dir.mkdir()
+    target = data_dir / "config.yml"
+    target.write_bytes(VALID_CONFIG.encode("utf-8"))
+    service = BackupService(
+        backup_dir=tmp_path / "backups",
+        register_db_path=tmp_path / "register.sqlite",
+        writer=StubWriter(),
+        deny_prefixes=(data_dir,),
+    )
+    sumber = service.create_backup(target, "manual")
+    assert sumber.ok and sumber.backup_id is not None
+    target.write_bytes(VALID_CONFIG.replace("404", "503").encode("utf-8"))
+
+    outcome = service.restore(sumber.backup_id, target, confirm=True)
+    assert outcome.status is RestoreStatus.TARGET_POLICY_REJECTED
+    assert outcome.ok is False
+    assert target.read_bytes() == VALID_CONFIG.replace("404", "503").encode(
+        "utf-8"
+    )  # tidak tersentuh
+    assert outcome.pre_restore_backup_path is None  # tak ada backup target
+    assert len(service.list_backups()) == 1  # hanya backup sumber
+
+
+def test_restore_revalidasi_kedua_sebelum_tulis(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Cek kebijakan #2 TEPAT sebelum menulis: kebijakan berubah di
+    antara cek #1 dan #2 → dibatalkan; backup pra-restore yang sempat
+    terbuat DIPERTAHANKAN (tanpa penghapusan, Q-09)."""
+    target = make_config(tmp_path)
+    service = BackupService(
+        backup_dir=tmp_path / "backups",
+        register_db_path=tmp_path / "register.sqlite",
+        writer=StubWriter(),
+    )
+    sumber = service.create_backup(target, "manual")
+    assert sumber.ok and sumber.backup_id is not None
+    target.write_bytes((VALID_CONFIG + "# lain\n").encode("utf-8"))
+
+    import tunneldesk.application.backup_service as bs
+    from tunneldesk.infrastructure.config_io.path_policy import (
+        PathValidationResult,
+        PathValidationStatus,
+    )
+
+    panggilan = {"n": 0}
+
+    def validate_dua_kali(t: Path, **kwargs: object):
+        panggilan["n"] += 1
+        if panggilan["n"] == 1:
+            return PathValidationResult(PathValidationStatus.OK, ok=True)
+        return PathValidationResult(
+            PathValidationStatus.DENIED_PREFIX,
+            ok=False,
+            detail="simulasi kebijakan berubah",
+        )
+
+    monkeypatch.setattr(bs, "validate_config_write_path", validate_dua_kali)
+    outcome = service.restore(sumber.backup_id, target, confirm=True)
+    assert panggilan["n"] == 2  # cek #1 dan #2 keduanya dijalankan
+    assert outcome.status is RestoreStatus.TARGET_POLICY_REJECTED
+    assert target.read_text("utf-8") == VALID_CONFIG + "# lain\n"  # utuh
+    assert len(service.list_backups()) == 2  # backup pra-restore dipertahankan
+
+
+def test_apply_dan_restore_menolak_target_yang_sama(tmp_path: Path) -> None:
+    """Simetri penuh (T-2): target terlarang yang sama ditolak BOTH oleh
+    apply dan restore — satu kebijakan, tanpa divergensi."""
+    from tunneldesk.application.config_apply_service import (
+        ApplyStatus,
+        ConfigApplyService,
+    )
+    from tunneldesk.application.config_preview import ConfigPreviewService
+    from tunneldesk.infrastructure.config_io.config_writer import (
+        AtomicConfigFileWriter,
+    )
+
+    dilarang = tmp_path / "dilarang"
+    dilarang.mkdir()
+    target = dilarang / "config.yml"
+    target.write_bytes(VALID_CONFIG.encode("utf-8"))
+
+    # Apply: ditolak kebijakan path.
+    backup = BackupService(
+        backup_dir=tmp_path / "backups",
+        register_db_path=tmp_path / "register.sqlite",
+        writer=AtomicConfigFileWriter(),
+        deny_prefixes=(dilarang,),  # kebijakan yang SAMA untuk restore
+    )
+    apply_svc = ConfigApplyService(
+        writer=AtomicConfigFileWriter(),
+        backup_service=backup,
+        deny_prefixes=(dilarang,),
+    )
+    preview = ConfigPreviewService().preview(
+        VALID_CONFIG, VALID_CONFIG.replace("404", "503")
+    )
+    assert preview.proposed_emitted_text is not None
+    outcome_apply = apply_svc.apply(  # type: ignore[arg-type]
+        apply_svc.prepare(target, preview, VALID_CONFIG),  # type: ignore[arg-type]
+        confirm=True,
+    )
+    assert outcome_apply.status is ApplyStatus.PATH_REJECTED
+
+    # Restore: ditolak kebijakan yang SAMA (deny-prefix identik).
+    sumber = backup.create_backup(target, "manual")
+    assert sumber.ok and sumber.backup_id is not None
+    target.write_bytes(VALID_CONFIG.replace("404", "606").encode("utf-8"))
+    outcome_restore = backup.restore(sumber.backup_id, target, confirm=True)
+    assert outcome_restore.status is RestoreStatus.TARGET_POLICY_REJECTED
+    assert target.read_bytes() == VALID_CONFIG.replace("404", "606").encode(
+        "utf-8"
+    )

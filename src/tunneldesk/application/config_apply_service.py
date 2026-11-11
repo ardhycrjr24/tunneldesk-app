@@ -50,11 +50,7 @@ from pathlib import Path
 from tunneldesk.application.backup_service import BackupService
 from tunneldesk.application.config_preview import ConfigPreview
 from tunneldesk.application.config_validator import ConfigValidator
-from tunneldesk.application.settings_store import (
-    default_backup_dir,
-    default_log_dir,
-    default_settings_dir,
-)
+from tunneldesk.application.settings_store import default_app_deny_prefixes
 from tunneldesk.domain.config.backup import (
     BackupResult,
     ConfigFileWriter,
@@ -183,15 +179,12 @@ class ConfigApplyService:
         self._backup = backup_service
         self._validator = validator or ConfigValidator()
         self._redaction = redaction or RedactionEngine()
-        #: Deny-prefix aplikasi (Q3b-8): direktori data TunnelDesk.
+        #: Deny-prefix aplikasi (Q3b-8) — SATU SUMBER dengan jalur
+        #: restore (koreksi audit T-2): default_app_deny_prefixes().
         self._deny_prefixes: tuple[Path, ...] = tuple(
             deny_prefixes
             if deny_prefixes is not None
-            else (
-                default_settings_dir(),
-                default_log_dir(),
-                default_backup_dir(),
-            )
+            else default_app_deny_prefixes()
         )
 
     # ------------------------------------------------------------------

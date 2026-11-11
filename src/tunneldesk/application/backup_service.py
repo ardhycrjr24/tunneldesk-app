@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import time
 import uuid
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -55,6 +56,9 @@ from tunneldesk.infrastructure.config_io.backup_io import (
     create_backup_copy,
     read_backup_bytes,
 )
+from tunneldesk.infrastructure.config_io.path_policy import (
+    validate_config_write_path,
+)
 from tunneldesk.infrastructure.persistence.backup_register import (
     BackupRegisterError,
     SqliteBackupRegister,
@@ -77,6 +81,7 @@ class BackupService:
         validator: ConfigValidator | None = None,
         writer: ConfigFileWriter | None = None,
         redaction: RedactionEngine | None = None,
+        deny_prefixes: Sequence[Path] | None = None,
     ) -> None:
         self._backup_dir = Path(backup_dir)
         self._register = register or SqliteBackupRegister(
@@ -91,6 +96,17 @@ class BackupService:
         #: implementasi atomic write (instruksi §3.D).
         self._writer = writer
         self._redaction = redaction or RedactionEngine()
+        #: Kebijakan path Q3b (koreksi audit T-2): deny-prefix yang SAMA
+        #: dengan jalur apply — direktori data TunnelDesk dilindungi.
+        from tunneldesk.application.settings_store import (
+            default_app_deny_prefixes,
+        )
+
+        self._deny_prefixes: tuple[Path, ...] = tuple(
+            deny_prefixes
+            if deny_prefixes is not None
+            else default_app_deny_prefixes()
+        )
 
     # ------------------------------------------------------------------
     # Create backup
@@ -275,6 +291,13 @@ class BackupService:
                 post_restore_validation=post_validation,
             )
 
+        # Kebijakan path Q3b — SAMA dengan jalur apply (koreksi audit T-2):
+        # cek #1 SEBELUM backup pra-restore (penolakan tidak menimbulkan
+        # efek samping), cek #2 TEPAT sebelum menulis (perkecil TOCTOU).
+        policy = self._check_target_policy(target_path)
+        if policy is not None:
+            return policy
+
         # Backup target saat ini SEBELUM ditimpa (keputusan PO Q4,
         # Task 2.5) — memakai mekanisme Task 2.4 sendiri (tanpa
         # duplikasi). Tidak ada loop: create_backup hanya MEMBACA
@@ -301,6 +324,11 @@ class BackupService:
                 )
         pre_id = pre_restore.backup_id if pre_restore else None
         pre_path = pre_restore.backup_path if pre_restore else None
+
+        # Cek #2: revalidasi kebijakan tepat sebelum menulis (T-2).
+        policy = self._check_target_policy(target_path)
+        if policy is not None:
+            return policy
 
         try:
             self._writer.write_config_bytes(target_path, data)
@@ -363,6 +391,29 @@ class BackupService:
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
+    def _check_target_policy(
+        self, target_path: Path
+    ) -> RestoreOutcome | None:
+        """Kebijakan path Q3b atas target restore (koreksi audit T-2).
+
+        Mengembalikan ``RestoreOutcome`` TARGET_POLICY_REJECTED bila
+        ditolak (detail memuat status kebijakan), atau ``None`` bila
+        sah. Kebijakan = fungsi yang sama dengan jalur apply
+        (``validate_config_write_path``) + deny-prefix yang sama
+        (``default_app_deny_prefixes``) — tanpa logika divergen.
+        """
+        result = validate_config_write_path(
+            target_path, deny_prefixes=self._deny_prefixes
+        )
+        if result.ok:
+            return None
+        return RestoreOutcome(
+            status=RestoreStatus.TARGET_POLICY_REJECTED,
+            ok=False,
+            detail=f"kebijakan path menolak target: {result.detail}",
+            target_path=target_path,
+        )
+
     @staticmethod
     def _failed_result(copy_result: BackupCopyResult) -> BackupResult:
         mapping = {

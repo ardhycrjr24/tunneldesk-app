@@ -61,6 +61,10 @@ class RestoreStatus(enum.Enum):
     #: Backup target saat ini (pra-restore, keputusan PO Q4 Task 2.5)
     #: gagal dibuat/diverifikasi — restore dibatalkan tanpa menulis.
     PRE_RESTORE_BACKUP_FAILED = "PRE_RESTORE_BACKUP_FAILED"
+    #: Target melanggar kebijakan path Q3b (deny-prefix direktori data
+    #: aplikasi / struktural) — koreksi audit T-2: kebijakan yang sama
+    #: dengan jalur apply, ditegakkan SEBELUM backup dan SEBELUM tulis.
+    TARGET_POLICY_REJECTED = "TARGET_POLICY_REJECTED"
     TARGET_UNWRITABLE = "TARGET_UNWRITABLE"
     RESTORE_HASH_MISMATCH = "RESTORE_HASH_MISMATCH"
     REGISTER_ERROR = "REGISTER_ERROR"

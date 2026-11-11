@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -103,7 +104,7 @@ def test_gagal_tulis_temp_target_utuh(
     target.write_bytes(DATA)
     writer = AtomicConfigFileWriter()
 
-    def open_gagal(path: object, flags: int, *args: object) -> int:
+    def open_gagal(*args: object, **kwargs: object) -> int:
         raise OSError(28, "simulasi disk penuh (tulis temp gagal)")
 
     monkeypatch.setattr(os, "open", open_gagal)
@@ -120,8 +121,8 @@ def test_gagal_verifikasi_temp_target_utuh(
     target.write_bytes(DATA)
     writer = AtomicConfigFileWriter()
     monkeypatch.setattr(
-        "tunneldesk.infrastructure.config_io.config_writer.file_sha256_hex",
-        lambda path: "0" * 64,  # hash palsu ≠ hash data → verifikasi gagal
+        "tunneldesk.infrastructure.config_io.config_writer._sha256_of_handle",
+        lambda handle: "0" * 64,  # hash palsu ≠ hash data → verifikasi gagal
     )
     with pytest.raises(OSError):
         writer.write_config_bytes(target, DATA)
@@ -137,7 +138,7 @@ def test_gagal_replace_target_utuh(
     target.write_bytes(DATA)
     writer = AtomicConfigFileWriter()
 
-    def replace_gagal(src: object, dst: object) -> None:
+    def replace_gagal(*args: object, **kwargs: object) -> None:
         raise PermissionError(32, "simulasi target terkunci proses lain")
 
     monkeypatch.setattr(os, "replace", replace_gagal)
@@ -184,7 +185,7 @@ def test_chmod_izin_lama_gagal_dilaporkan(
     os.chmod(target, 0o640)
     writer = AtomicConfigFileWriter()
 
-    def chmod_gagal(path: object, mode: int) -> None:
+    def chmod_gagal(*args: object, **kwargs: object) -> None:
         raise PermissionError(1, "simulasi chmod gagal")
 
     monkeypatch.setattr(os, "chmod", chmod_gagal)
@@ -274,3 +275,144 @@ def test_writer_path_non_regular_ditolak(tmp_path: Path) -> None:
     with pytest.raises(OSError):
         AtomicConfigFileWriter().write_config_bytes(direktori, DATA)
     assert direktori.is_dir()  # direktori tidak dihapus/diganti
+
+
+# ----------------------------------------------------------------------
+# T-1 (koreksi audit) — adversarial parent-swap TOCTOU, deterministik
+# ----------------------------------------------------------------------
+def _tukar_parent_ke_terlarang(target: Path, terlarang: Path) -> None:
+    """Simulasi penyerang: tukar direktori induk menjadi symlink ke
+    direktori terlarang (skenario asli eksperimen audit 1).
+
+    Berbasis rename agar bekerja meski direktori masih berisi file (mis.
+    file temp yang belum direname): inode asli tetap ada di lokasi baru,
+    path lama kini menunjuk direktori terlarang.
+    """
+    moved = target.parent.with_name(target.parent.name + "-dipindah")
+    os.rename(target.parent, moved)
+    target.parent.symlink_to(terlarang)
+
+
+@pytest.fixture()
+def panggung_t1(tmp_path: Path) -> tuple[Path, Path, Path]:
+    """real_dir (sah) + terlarang (harusnya ditolak) + target di real_dir."""
+    real_dir = tmp_path / "real"
+    real_dir.mkdir()
+    terlarang = tmp_path / "terlarang"
+    terlarang.mkdir()
+    target = real_dir / "config.yml"
+    target.write_bytes(b"original\n")
+    return target, terlarang, real_dir
+
+
+def _tidak_ada_yang_mendarat(terlarang: Path) -> None:
+    """Direktori terlarang TIDAK berisi config maupun file temp."""
+    assert not (terlarang / "config.yml").exists()
+    assert list(terlarang.glob(".*.tmp-*")) == []
+
+
+@pytest.mark.skipif(IS_WINDOWS, reason="jalur dir_fd POSIX")
+def test_t1_parent_swap_setelah_validasi_ditolak(
+    panggung_t1: tuple[Path, Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Jalur dir_fd: penukaran induk SETELAH validasi entry → os.open
+    O_NOFOLLOW gagal (ELOOP) — TIDAK ada tulisan ke direktori terlarang."""
+    target, terlarang, _ = panggung_t1
+    import tunneldesk.infrastructure.config_io.config_writer as cw
+
+    real_validate = cw.validate_config_write_path
+
+    def validate_lalu_tukar(t: Path, **kwargs: object):
+        result = real_validate(t, **kwargs)  # validasi SAH (sebelum tukar)
+        if result.ok:
+            _tukar_parent_ke_terlarang(target, terlarang)
+        return result
+
+    monkeypatch.setattr(cw, "validate_config_write_path", validate_lalu_tukar)
+    with pytest.raises(OSError):
+        AtomicConfigFileWriter().write_config_bytes(target, b"baru\n")
+    _tidak_ada_yang_mendarat(terlarang)
+
+
+@pytest.mark.skipif(IS_WINDOWS, reason="jalur dir_fd POSIX")
+def test_t1_dir_fd_mengikat_tulisan_ke_direktori_tervalidasi(
+    panggung_t1: tuple[Path, Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pinning fd: penukaran induk tepat sebelum replace → replace tetap
+    terjadi DI DALAM inode yang tervalidasi; direktori terlarang kosong."""
+    target, terlarang, _ = panggung_t1
+    real_replace = os.replace
+
+    def replace_lalu_tukar(*args: object, **kwargs: object):
+        if not target.parent.is_symlink():
+            _tukar_parent_ke_terlarang(target, terlarang)
+        return real_replace(*args, **kwargs)  # dir_fd → inode tervalidasi
+
+    monkeypatch.setattr(os, "replace", replace_lalu_tukar)
+    AtomicConfigFileWriter().write_config_bytes(target, b"baru\n")
+    _tidak_ada_yang_mendarat(terlarang)
+
+
+def test_t1_fallback_penjaga_identitas_menolak(
+    panggung_t1: tuple[Path, Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Jalur fallback (Windows/tanpa dir_fd): penjaga identitas (dev,ino)
+    — direkam SEBELUM validasi — mendeteksi penukaran induk dan batal."""
+    target, terlarang, _ = panggung_t1
+    import tunneldesk.infrastructure.config_io.config_writer as cw
+
+    monkeypatch.setattr(os, "supports_dir_fd", frozenset())  # paksa fallback
+    real_validate = cw.validate_config_write_path
+
+    def validate_lalu_tukar(t: Path, **kwargs: object):
+        result = real_validate(t, **kwargs)
+        if result.ok:
+            _tukar_parent_ke_terlarang(target, terlarang)
+        return result
+
+    monkeypatch.setattr(cw, "validate_config_write_path", validate_lalu_tukar)
+    with pytest.raises(OSError, match="berubah selama penulisan"):
+        AtomicConfigFileWriter().write_config_bytes(target, b"baru\n")
+    _tidak_ada_yang_mendarat(terlarang)
+
+
+def test_t1_fallback_temp_di_direktori_tukar_dibersihkan(
+    panggung_t1: tuple[Path, Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Jalur fallback: temp sempat tercipta di direktori tertukar →
+    penjaga identitas #1 (setelah mkstemp) batal + temp dibersihkan."""
+    target, terlarang, _ = panggung_t1
+    monkeypatch.setattr(os, "supports_dir_fd", frozenset())  # paksa fallback
+    real_mkstemp = tempfile.mkstemp
+
+    def mkstemp_lalu_tukar(*args: object, **kwargs: object):
+        _tukar_parent_ke_terlarang(target, terlarang)
+        return real_mkstemp(*args, **kwargs)  # temp tercipta di terlarang
+
+    monkeypatch.setattr(tempfile, "mkstemp", mkstemp_lalu_tukar)
+    with pytest.raises(OSError, match="berubah selama penulisan"):
+        AtomicConfigFileWriter().write_config_bytes(target, b"baru\n")
+    _tidak_ada_yang_mendarat(terlarang)
+
+
+def test_t1_fallback_verifikasi_temp_gagal(
+    panggung_t1: tuple[Path, Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Jalur fallback: verifikasi hash temp gagal → batal, target utuh,
+    temp bersih (jalur fallback tetap teruji di POSIX)."""
+    target, terlarang, _ = panggung_t1
+    monkeypatch.setattr(os, "supports_dir_fd", frozenset())  # paksa fallback
+    monkeypatch.setattr(
+        "tunneldesk.infrastructure.config_io.config_writer.file_sha256_hex",
+        lambda path: "0" * 64,
+    )
+    with pytest.raises(OSError):
+        AtomicConfigFileWriter().write_config_bytes(target, b"baru\n")
+    assert target.read_bytes() == b"original\n"
+    _tidak_ada_yang_mendarat(terlarang)
+    assert not target.is_symlink()

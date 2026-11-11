@@ -24,6 +24,7 @@ __all__ = [
     "default_log_dir",
     "default_backup_dir",
     "default_settings_file",
+    "default_app_deny_prefixes",
 ]
 
 SETTINGS_FILENAME = "settings.json"
@@ -137,3 +138,15 @@ def default_backup_dir() -> Path:
 
 def default_settings_file() -> Path:
     return default_settings_dir() / SETTINGS_FILENAME
+
+
+def default_app_deny_prefixes() -> tuple[Path, ...]:
+    """Direktori data aplikasi yang TIDAK boleh menjadi target tulis
+    konfigurasi (kebijakan path Q3b-8, Task 2.5 — koreksi audit T-2).
+
+    Satu sumber kebenaran untuk Apply (``ConfigApplyService``) dan
+    Restore (``BackupService``) agar kebijakan tidak berdivergensi:
+    settings, logs, dan backups TunnelDesk sendiri dilindungi dari
+    penimpaan sebagai file konfigurasi.
+    """
+    return (default_settings_dir(), default_log_dir(), default_backup_dir())

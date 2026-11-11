@@ -68,7 +68,7 @@ def test_direktori_sistem_ditolak_portabel(
     ("raw", "platform", "flavor"),
     [
         ("/etcfoo/config.yml", "posix", PurePosixPath),  # batas komponen
-        ("/home/sekolah/cloudflared/config.yml", "posix", PurePosixPath),
+        ("/opt/sekolah/cloudflared/config.yml", "posix", PurePosixPath),
         ("C:\\WindowsX\\config.yml", "windows", PureWindowsPath),
         ("C:\\Users\\Sekolah\\config.yml", "windows", PureWindowsPath),
     ],
@@ -179,3 +179,76 @@ def test_junction_target_ditolak_windows(tmp_path: Path) -> None:
     _winapi.CreateJunction(str(dir_asli), str(junction))
     result = validate_config_write_path(junction / "config.yml")
     assert result.status is PathValidationStatus.PARENT_SYMLINK
+
+
+# ----------------------------------------------------------------------
+# T-3 (koreksi audit) — bentuk kanonis tidak lagi melewati daftar sistem
+# ----------------------------------------------------------------------
+@pytest.mark.parametrize(
+    ("raw", "flavor"),
+    [
+        ("/private/etc/config.yml", PurePosixPath),
+        ("/private/var/config.yml", PurePosixPath),
+        ("/private/tmp/config.yml", PurePosixPath),
+        ("/PRIVATE/ETC/config.yml", PurePosixPath),  # case-insensitive
+        ("/private/var/folders/abc/T/x.yml", PurePosixPath),
+    ],
+)
+def test_t3_bentuk_kanonis_macos_ditolak(raw: str, flavor: type) -> None:
+    """Regresi eksperimen audit 5: /private/{etc,var,tmp} — bentuk
+    kanonis dari /etc, /var, /tmp — kini DITOLAK seperti bentuk asalnya."""
+    result = validate_config_write_path(flavor(raw), platform="posix")
+    assert result.status is PathValidationStatus.SYSTEM_DIRECTORY
+
+
+@pytest.mark.skipif(IS_WINDOWS, reason="uji symlink POSIX")
+def test_t3_symlink_parent_ditolak(tmp_path: Path) -> None:
+    """Symlink sebagai parent langsung → PARENT_SYMLINK (sudah ada)."""
+    dalam = tmp_path / "dalam"
+    dalam.mkdir()
+    jembatan = tmp_path / "jembatan"
+    jembatan.symlink_to(dalam, target_is_directory=True)
+    result = validate_config_write_path(jembatan / "config.yml")
+    assert result.status is PathValidationStatus.PARENT_SYMLINK
+
+
+@pytest.mark.skipif(IS_WINDOWS, reason="uji symlink POSIX")
+def test_t3_symlink_ke_direktori_sistem_ditolak_realpath(
+    tmp_path: Path,
+) -> None:
+    """Belt realpath (koreksi T-3): symlink yang MENUNJUK /etc ditolak
+    sebagai SYSTEM_DIRECTORY via bentuk ter-resolve (/private/etc di
+    macOS), terlepas dari path literal yang berada di lokasi pengguna."""
+    jembatan = tmp_path / "ke-etc"
+    jembatan.symlink_to("/etc", target_is_directory=True)
+    result = validate_config_write_path(jembatan / "config.yml")
+    assert result.status is PathValidationStatus.SYSTEM_DIRECTORY
+
+
+@pytest.mark.skipif(IS_WINDOWS, reason="pembuatan symlink butuh hak di Windows")
+def test_t3_path_legitim_tetap_lulus_realpath(tmp_path: Path) -> None:
+    """Legitimate path pengguna tidak tertolak oleh pencocokan kanonis."""
+    target = tmp_path / "config.yml"
+    target.write_bytes(b"x")
+    result = validate_config_write_path(target)
+    assert result.status is PathValidationStatus.OK
+
+
+@pytest.mark.skipif(not IS_WINDOWS, reason="nama-pendek 8.3 hanya Windows")
+def test_t3_windows_nama_pendek_83_ditolak() -> None:
+    """Investigasi T-3 di Windows nyata (bukan asumsi): bila volume
+    mengaktifkan nama-pendek 8.3, alias ``C:\\PROGRA~1`` yang menunjuk
+    ``C:\\Program Files`` harus ditolak. Bila 8.3 dinonaktifkan pada
+    volume runner → SKIP jujur (bukti tidak diada-ada)."""
+    import ctypes
+    from pathlib import PureWindowsPath
+
+    kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+    buf = ctypes.create_unicode_buffer(1024)
+    panjang = kernel32.GetShortPathNameW("C:\\Program Files", buf, 1024)
+    if panjang == 0 or buf.value == "C:\\Program Files":
+        pytest.skip("nama-pendek 8.3 tidak aktif pada volume runner")
+    result = validate_config_write_path(
+        PureWindowsPath(buf.value + "\\audit.yml"), platform="windows"
+    )
+    assert result.status is PathValidationStatus.SYSTEM_DIRECTORY

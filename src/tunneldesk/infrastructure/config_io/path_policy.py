@@ -36,7 +36,9 @@ Limitasi jujur (didokumentasikan, TIDAK diklaim tertutup):
 from __future__ import annotations
 
 import enum
+import ntpath
 import os
+import posixpath
 import stat as stat_module
 import sys
 from collections.abc import Sequence
@@ -110,6 +112,43 @@ _POSIX_SYSTEM_PREFIXES: tuple[str, ...] = (
     "/var",
 )
 
+# Alias kanonis macOS (fakta OS stabil: /etc, /var, /tmp adalah symlink ke
+# /private/*) — koreksi audit T-3: tanpa ini, bentuk kanonis /private/etc
+# melewati daftar padahal /etc ditolak. Dihardcode agar deterministik dan
+# portabel (realpath saat import berperilaku beda antar OS); bentuk kanonis
+# lain ditangkap saat pemeriksaan via realpath atas path target.
+_POSIX_CANONICAL_ALIASES: tuple[str, ...] = (
+    "/private/etc",
+    "/private/var",
+    "/private/tmp",
+)
+
+_POSIX_SYSTEM_PREFIXES_ALL: tuple[str, ...] = _POSIX_SYSTEM_PREFIXES + _POSIX_CANONICAL_ALIASES
+
+_WINDOWS_SYSTEM_PREFIXES_CANONICAL: tuple[str, ...] | None = None
+
+
+def _windows_canonical_prefixes() -> tuple[str, ...]:
+    """Prefiks sistem Windows dalam bentuk kanonis (lazy, hanya di Windows
+    nyata — realpath lintas-OS menghasilkan bentuk tidak bermakna; koreksi T-3).
+
+    ``ntpath.realpath`` di Windows menyelesaikan komponen yang ADA melalui
+    filesystem (termasuk ekspansi nama-pendek 8.3 oleh GetFinalPathNameByHandle)
+    sehingga alias seperti ``C:\\PROGRA~1`` tercocokkan ke ``c:\\program files``.
+    Perilaku 8.3 pada volume tertentu TIDAK diverifikasi fisik (lihat laporan).
+    """
+    global _WINDOWS_SYSTEM_PREFIXES_CANONICAL
+    if _WINDOWS_SYSTEM_PREFIXES_CANONICAL is None:
+        import ntpath
+
+        canonical: set[str] = set()
+        for prefix in _WINDOWS_SYSTEM_PREFIXES:
+            canonical.add(_normalized_windows_string(Path(prefix)))
+            resolved = ntpath.realpath(prefix)
+            canonical.add(_normalized_windows_string(Path(resolved)))
+        _WINDOWS_SYSTEM_PREFIXES_CANONICAL = tuple(sorted(canonical))
+    return _WINDOWS_SYSTEM_PREFIXES_CANONICAL
+
 
 def _normalized_windows_string(path: Path) -> str:
     """Bentuk kanonis pembanding Windows: backslash + huruf kecil,
@@ -120,23 +159,47 @@ def _normalized_windows_string(path: Path) -> str:
 def _reject_system_directory(target: Path, platform: str) -> bool:
     """True bila target berada di bawah direktori sistem platform.
 
-    Pembandingan tidak sensitif huruf (filesystem Windows dan macOS
-    umumnya case-insensitive; pada Linux case-sensitive, menolak lebih
-    banyak variasi huruf = konservatif-aman). Kedua sisi diberi akhiran
-    pemisah sehingga cocoknya berbatas komponen (``/etc/foo`` ditolak,
-    ``/etcfoo`` tidak; ``C:\\WindowsX`` tidak dianggap di bawah
-    ``C:\\Windows``).
+    Koreksi audit T-3: pencocokan KANONIS — bentuk literal DAN bentuk
+    ter-resolve (realpath atas komponen yang ada) dibandingkan terhadap
+    daftar yang memuat alias kanonis (macOS: /private/{etc,var,tmp};
+    Windows nyata: resolusi ntpath.realpath termasuk nama-pendek 8.3).
+    Kedua sisi diberi akhiran pemisah sehingga cocoknya berbatas
+    komponen (``/etc/foo`` ditolak, ``/etcfoo`` tidak; ``C:\\WindowsX``
+    tidak dianggap di bawah ``C:\\Windows``). Pembandingan tidak
+    sensitif huruf (filesystem Windows dan macOS umumnya
+    case-insensitive; pada Linux case-sensitive, menolak lebih banyak
+    variasi huruf = konservatif-aman).
     """
     if platform == "windows":
-        candidate = _normalized_windows_string(target)
-        return any(
-            candidate.startswith(prefix + "\\")
+        literal = _normalized_windows_string(target)
+        if any(
+            literal.startswith(prefix + "\\")
             for prefix in _WINDOWS_SYSTEM_PREFIXES
-        )
-    candidate = str(target).rstrip("/").lower() + "/"
+        ):
+            return True
+        # Kanonis hanya di OS Windows nyata (realpath lintas-OS tidak
+        # bermakna); di luar itu pencocokan literal portabel saja.
+        if sys.platform == "win32":
+            canonical = _normalized_windows_string(Path(ntpath.realpath(str(target))))
+            return any(
+                canonical.startswith(prefix + "\\")
+                for prefix in _windows_canonical_prefixes()
+            )
+        return False
+    literal = str(target).rstrip("/").lower() + "/"
+    if any(
+        literal.startswith(prefix + "/")
+        for prefix in _POSIX_SYSTEM_PREFIXES_ALL
+    ):
+        return True
+    # Bentuk ter-resolve: symlink/alias yang mengarah ke direktori sistem
+    # ditolak meski path literalnya di luar daftar (koreksi T-3).
+    resolved = posixpath.realpath(str(target)).rstrip("/").lower() + "/"
+    if resolved == literal:
+        return False
     return any(
-        candidate.startswith(prefix + "/")
-        for prefix in _POSIX_SYSTEM_PREFIXES
+        resolved.startswith(prefix + "/")
+        for prefix in _POSIX_SYSTEM_PREFIXES_ALL
     )
 
 

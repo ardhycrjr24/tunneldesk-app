@@ -190,10 +190,14 @@ def _reject_system_directory(target: Path, platform: str) -> bool:
             return True
         # Kanonis hanya di OS Windows nyata (realpath lintas-OS tidak
         # bermakna); di luar itu pencocokan literal portabel saja.
+        # Catatan: prefiks kanonis tersimpan SUDAH berakhiran pemisah
+        # (warisan _normalized_windows_string) — tanpa tambahan "\\" lagi
+        # (pelajaran CI: prefix + "\\" membuat pencocokan tak pernah
+        # cocok — bug yang hanya hidup di cabang win32).
         if sys.platform == "win32":
             canonical = _normalized_windows_string(Path(ntpath.realpath(str(target))))
             return any(
-                canonical.startswith(prefix + "\\")
+                canonical.startswith(prefix)
                 for prefix in _windows_canonical_prefixes()
             )
         return False

@@ -58,6 +58,9 @@ class RestoreStatus(enum.Enum):
     BACKUP_FILE_MISSING = "BACKUP_FILE_MISSING"
     BACKUP_HASH_MISMATCH = "BACKUP_HASH_MISMATCH"
     BACKUP_VALIDATION_FAILED = "BACKUP_VALIDATION_FAILED"
+    #: Backup target saat ini (pra-restore, keputusan PO Q4 Task 2.5)
+    #: gagal dibuat/diverifikasi — restore dibatalkan tanpa menulis.
+    PRE_RESTORE_BACKUP_FAILED = "PRE_RESTORE_BACKUP_FAILED"
     TARGET_UNWRITABLE = "TARGET_UNWRITABLE"
     RESTORE_HASH_MISMATCH = "RESTORE_HASH_MISMATCH"
     REGISTER_ERROR = "REGISTER_ERROR"
@@ -112,15 +115,25 @@ class RestoreOutcome:
     restored_sha256: str | None = None
     #: Validasi ulang pasca-restore (E-6) — terpisah dari hasil salinan.
     post_restore_validation: ValidationOutcome | None = None
+    #: Backup target saat ini SEBELUM ditimpa (keputusan PO Q4, Task
+    #: 2.5) — terpisah dari backup sumber (``backup_id``/``backup_path``
+    #: = backup sumber yang direstore).
+    pre_restore_backup_id: str | None = None
+    pre_restore_backup_path: Path | None = None
 
 
 class ConfigFileWriter(Protocol):
-    """Port penulis konfigurasi produksi — **implementasi = Task 2.5**.
+    """Port penulis konfigurasi produksi — diimplementasi Task 2.5
+    (``AtomicConfigFileWriter``).
 
     Kontrak implementasi wajib: tulis atomik (temp + replace) sehingga
     target tidak pernah setengah tertulis; verifikasi oleh pemanggil.
     Task 2.4 hanya mendefinisikan port ini (tanpa implementasi kedua —
     instruksi §3.D).
+
+    Model error (dikontrakkan Task 2.5): implementasi melempar **hanya**
+    ``OSError`` (dan subclass) — konsumen aktual
+    (``BackupService.restore``) menangkap ``OSError`` saja.
     """
 
     def write_config_bytes(self, target: Path, data: bytes) -> None:

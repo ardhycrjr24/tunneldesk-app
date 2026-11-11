@@ -58,7 +58,15 @@ _REJECTED_PROPOSED = (
 
 @dataclass(frozen=True)
 class ConfigPreview:
-    """Hasil preview/diff — read-only, siap ditampilkan (sudah disanitasi)."""
+    """Hasil preview/diff — read-only, siap ditampilkan.
+
+    Field tampilan (diff, notes, errors) sudah disanitasi (D-18).
+    ``proposed_emitted_text`` (Task 2.5, keputusan PO Q2) BERBEDA
+    kategori: artefak tulis internal — teks emit usulan PERSIS yang
+    menjadi dasar diff dan yang akan ditulis ke disk saat apply (tanpa
+    serialisasi ulang). Bukan teks tampilan, tidak disanitasi, tidak
+    untuk log/UI. Field aditif dengan default — kompatibel mundur.
+    """
 
     #: True bila preview ditolak (sintaks salah) — fields lain minimal.
     rejected: bool
@@ -74,6 +82,8 @@ class ConfigPreview:
     diff: ConfigDiff | None
     #: Catatan untuk pengguna (sudah disanitasi).
     notes: tuple[str, ...]
+    #: Artefak tulis Task 2.5 (Q2) — lihat docstring kelas.
+    proposed_emitted_text: str | None = None
 
     @property
     def has_changes(self) -> bool:
@@ -227,6 +237,9 @@ class ConfigPreviewService:
             original_not_canonical=not original.round_trip_preserved,
             diff=sanitized_diff,
             notes=tuple(notes),
+            # Q2 (Task 2.5): artefak tulis — teks emit usulan apa adanya
+            # (bukan teks tampilan; lihat docstring ConfigPreview).
+            proposed_emitted_text=proposed.emitted_text,
         )
 
     # ------------------------------------------------------------------

@@ -16,6 +16,11 @@ Kebijakan (disetujui Project Control, Task 2.4):
 - Penulisan produksi restore membutuhkan port :class:`ConfigFileWriter`
   (Task 2.5, atomic write). Tanpa writer → ``PENDING_ATOMIC_WRITE`` dan
   **tidak ada byte yang ditulis** (instruksi §3.D.4).
+- Backup pra-restore target (keputusan PO Q4, Task 2.5): sebelum
+  menimpa target yang ada, kondisi terkininya dibackup via
+  ``create_backup(trigger="pre-restore")`` — gagal → restore dibatalkan
+  tanpa menulis (``PRE_RESTORE_BACKUP_FAILED``). Backup sumber dan
+  backup target dilaporkan di field terpisah.
 
 Perbedaan kondisi yang tidak boleh disamakan (instruksi §5):
 backup hash valid ≠ file berhasil dipulihkan ≠ konfigurasi valid skema ≠
@@ -176,7 +181,8 @@ class BackupService:
 
         Penulisan produksi membutuhkan ``ConfigFileWriter`` (Task 2.5).
         Tanpa writer → ``PENDING_ATOMIC_WRITE`` dan tidak ada byte yang
-        ditulis (kontrak aman, instruksi §3.D).
+        ditulis (kontrak aman, instruksi §3.D). Target yang sudah ada
+        dibackup dulu (Q4) — gagal backup → restore dibatalkan.
         """
         target_path = Path(target_path)
         if not confirm:
@@ -269,6 +275,33 @@ class BackupService:
                 post_restore_validation=post_validation,
             )
 
+        # Backup target saat ini SEBELUM ditimpa (keputusan PO Q4,
+        # Task 2.5) — memakai mekanisme Task 2.4 sendiri (tanpa
+        # duplikasi). Tidak ada loop: create_backup hanya MEMBACA
+        # sumber dan menulis ke direktori backup. Target tidak ada →
+        # restore membuat ulang file (tidak ada yang perlu dibackup).
+        # Backup sumber (direstore) tetap tercatat di backup_id/
+        # backup_path — dua backup ini TIDAK disamakan.
+        pre_restore: BackupResult | None = None
+        if target_path.exists():
+            pre_restore = self.create_backup(target_path, "pre-restore")
+            if not pre_restore.ok:
+                return RestoreOutcome(
+                    status=RestoreStatus.PRE_RESTORE_BACKUP_FAILED,
+                    ok=False,
+                    detail=(
+                        "backup pra-restore gagal "
+                        f"({pre_restore.status.value}) — restore "
+                        "dibatalkan, target tidak disentuh"
+                    ),
+                    backup_id=backup_id,
+                    backup_path=backup_path,
+                    target_path=target_path,
+                    post_restore_validation=post_validation,
+                )
+        pre_id = pre_restore.backup_id if pre_restore else None
+        pre_path = pre_restore.backup_path if pre_restore else None
+
         try:
             self._writer.write_config_bytes(target_path, data)
         except OSError as exc:
@@ -280,6 +313,8 @@ class BackupService:
                 backup_path=backup_path,
                 target_path=target_path,
                 post_restore_validation=post_validation,
+                pre_restore_backup_id=pre_id,
+                pre_restore_backup_path=pre_path,
             )
 
         verify_sha = self._verify_target(target_path, backup_sha)
@@ -291,6 +326,8 @@ class BackupService:
                 backup_id=backup_id,
                 backup_path=backup_path,
                 target_path=target_path,
+                pre_restore_backup_id=pre_id,
+                pre_restore_backup_path=pre_path,
             )
         try:
             self._register.mark_restored(backup_id, time.time())
@@ -306,6 +343,8 @@ class BackupService:
                 copied=True,
                 restored_sha256=verify_sha,
                 post_restore_validation=self._validator.validate_path(target_path),
+                pre_restore_backup_id=pre_id,
+                pre_restore_backup_path=pre_path,
             )
 
         return RestoreOutcome(
@@ -317,6 +356,8 @@ class BackupService:
             backup_path=backup_path,
             target_path=target_path,
             post_restore_validation=self._validator.validate_path(target_path),
+            pre_restore_backup_id=pre_id,
+            pre_restore_backup_path=pre_path,
         )
 
     # ------------------------------------------------------------------

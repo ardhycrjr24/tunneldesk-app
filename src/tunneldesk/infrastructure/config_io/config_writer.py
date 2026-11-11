@@ -101,7 +101,12 @@ class AtomicConfigFileWriter:
         )
         temp_path = Path(temp_name)
         try:
-            with os.fdopen(fd, "wb") as handle:
+            try:
+                handle = os.fdopen(fd, "wb")
+            except OSError:
+                os.close(fd)  # hindari bocor fd bila fdopen gagal
+                raise
+            with handle:
                 handle.write(data)
                 handle.flush()
                 os.fsync(handle.fileno())

@@ -248,7 +248,19 @@ def test_t3_windows_nama_pendek_83_ditolak() -> None:
     panjang = kernel32.GetShortPathNameW("C:\\Program Files", buf, 1024)
     if panjang == 0 or buf.value == "C:\\Program Files":
         pytest.skip("nama-pendek 8.3 tidak aktif pada volume runner")
+    # Prekondisi jujur: mekanisme kanonis hanya dapat diverifikasi via 8.3
+    # bila realpath runner ini benar-benar menyelesaikan nama pendek.
+    import ntpath
+    import os as _os
+
+    asli = buf.value + "\\audit.yml"
+    resolusi = ntpath.realpath(asli)
+    if _os.path.normcase(resolusi) == _os.path.normcase(asli):
+        pytest.skip(
+            "realpath tidak menyelesaikan 8.3 pada runner ini — "
+            "verifikasi kanonis 8.3 tidak memungkinkan (NOT VERIFIED)"
+        )
     result = validate_config_write_path(
-        PureWindowsPath(buf.value + "\\audit.yml"), platform="windows"
+        PureWindowsPath(asli), platform="windows"
     )
     assert result.status is PathValidationStatus.SYSTEM_DIRECTORY

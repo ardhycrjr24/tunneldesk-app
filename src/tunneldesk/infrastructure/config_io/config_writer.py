@@ -282,13 +282,16 @@ class AtomicConfigFileWriter:
             prefix=f".{target.name}{_TEMP_SUFFIX}", dir=parent
         )
         temp_path = Path(temp_name)
+        fd_terbuka = True
         try:
             self._ensure_parent_stable(target, parent, identity)
             try:
                 handle = os.fdopen(fd, "wb")
             except OSError:
-                os.close(fd)  # hindari bocor fd bila fdopen gagal
+                os.close(fd)
+                fd_terbuka = False
                 raise
+            fd_terbuka = False  # kepemilikan fd beralih ke handle
             with handle:
                 handle.write(data)
                 handle.flush()
@@ -303,6 +306,14 @@ class AtomicConfigFileWriter:
             self._ensure_parent_stable(target, parent, identity)
             os.replace(temp_path, target)
         finally:
+            # Pelajaran CI Windows (WinError 32): file dengan handle
+            # terbuka TIDAK dapat dihapus — fd ditutup SEBELUM unlink
+            # pada semua jalur (kegagalan di tengah menutup fd dulu).
+            if fd_terbuka:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
             temp_path.unlink(missing_ok=True)
 
     def _dir_identity(self, parent: Path) -> tuple[int, int] | None:

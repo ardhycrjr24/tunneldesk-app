@@ -25,6 +25,8 @@ def pytest_configure(config: object) -> None:
     basetemp = getattr(config, "option", None)
     if basetemp is not None and not getattr(basetemp, "basetemp", None):
         # Diisi hanya bila pemanggil tidak menentukan --basetemp sendiri.
-        basetemp.basetemp = str(
-            Path.home() / ".cache" / "tunneldesk-pytest-tmp"
-        )
+        # Parent dibuat eksplisit — pytest tidak membuat rantai induknya
+        # (pelajaran CI: ~/.cache belum ada di runner Windows bersih).
+        root = Path.home() / ".cache" / "tunneldesk-pytest-tmp"
+        root.mkdir(parents=True, exist_ok=True)
+        basetemp.basetemp = str(root)

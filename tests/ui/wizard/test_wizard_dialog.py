@@ -225,7 +225,12 @@ def test_unknown_keys_memblokir_lanjut(tmp_path: Path, qtbot: object) -> None:
     _ke_pilih(dialog, qtbot, target)
     dialog.next_button().click()  # builder + cek
     _tunggu(dialog, qtbot, 3)
-    assert dialog.state.check is not None and dialog.state.check.blocked
+    # Tunggu kondisi AKHIR (check terisi) — `state.check` diisi setelah
+    # `_worker = None` dalam callback yang sama (race CI Windows).
+    qtbot.waitUntil(
+        lambda: dialog.state.check is not None, timeout=20000
+    )
+    assert dialog.state.check.blocked
     assert not dialog.next_button().isEnabled()  # diblokir jujur
 
 

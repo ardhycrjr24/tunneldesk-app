@@ -23,7 +23,7 @@ Modul murni orkestrasi tanpa I/O file (teks masuk, teks keluar).
 
 from __future__ import annotations
 
-from collections.abc import Mapping, MutableMapping
+from collections.abc import Mapping, MutableMapping, MutableSequence
 from dataclasses import dataclass
 
 from tunneldesk.infrastructure.config_io.yaml_parser import RoundTripYamlParser
@@ -184,49 +184,99 @@ class ConfigProposalBuilder:
         rules: tuple[IngressRule, ...],
         notes: list[str],
     ) -> None:
-        """Mutasi ``ingress`` in-place: baris posisi sama diperbarui
-        (properti tambahannya TERBAWA), baris baru disisipkan, kelebihan
-        baris dihapus — penghapusan atas item berproperti tambahan
-        dilaporkan jujur."""
+        """Mutasi ``ingress`` dengan pencocokan baris dua tahap (R-1):
+
+        Tahap 1 — pencocokan NILAI: baris formulir yang identik dengan
+        baris asal (hostname+service ternormalisasi) memakai ulang baris
+        asal tersebut, di posisi mana pun — komentar mengikutinya.
+        Tahap 2 — fallback posisi: baris formulir tersisa (nilai berubah)
+        memakai ulang baris asal tersisa secara berurutan (baris "sama
+        yang diedit" tetap dianggap baris yang sama).
+        Baris asal tak terpakai → dihapus (komentarnya ikut pergi — tanpa
+        yatim); baris baru → tanpa komentar. R-2: catatan per-baris akurat
+        berdasarkan kondisi asli. Semantik akhir = persis formulir.
+        """
         existing = document.get("ingress")
         if not isinstance(existing, list):
             existing = []
             document["ingress"] = existing
 
-        preserved_extras: list[str] = []
+        old_items = list(existing)
+
+        def nilai(rule: IngressRule) -> tuple[str, str]:
+            return (rule.hostname.strip(), rule.service.strip())
+
+        def nilai_item(item: Mapping[object, object]) -> tuple[str, str]:
+            hostname = item.get("hostname", "")
+            service = item.get("service", "")
+            return (
+                str(hostname).strip() if isinstance(hostname, str) else "",
+                str(service).strip() if isinstance(service, str) else "",
+            )
+
+        # Tahap 1: pencocokan nilai (konsumsi baris asal pertama yang cocok).
+        dipakai: dict[int, int] = {}  # indeks rule → indeks asal
+        terkonsumsi: set[int] = set()
         for index, rule in enumerate(rules):
-            if index < len(existing) and isinstance(
-                existing[index], Mapping
-            ):
-                item = existing[index]
-                extras = [
-                    str(key)
-                    for key in item
-                    if key not in _MANAGED_INGRESS_KEYS
-                ]
-                if extras:
-                    preserved_extras.append(
-                        f"baris {index + 1}: {', '.join(extras)}"
-                    )
-                self._write_row(item, rule)
-            else:
-                if index < len(existing):
-                    notes.append(
-                        f"baris ingress {index + 1} bukan pemetaan — "
-                        "diganti oleh nilai formulir"
-                    )
+            for old_index, old in enumerate(old_items):
+                if old_index in terkonsumsi or not isinstance(
+                    old, MutableMapping
+                ):
+                    continue
+                if nilai_item(old) == nilai(rule):
+                    dipakai[index] = old_index
+                    terkonsumsi.add(old_index)
+                    break
+
+        # Tahap 2: fallback posisi untuk rule yang tak cocok nilainya.
+        sisa_asal = [
+            i for i in range(len(old_items)) if i not in terkonsumsi
+        ]
+        for index in range(len(rules)):
+            if index in dipakai:
+                continue
+            if sisa_asal:
+                old_index = sisa_asal.pop(0)
+                dipakai[index] = old_index
+                terkonsumsi.add(old_index)
+
+        # Susun konten final sesuai formulir.
+        new_items: list[object] = []
+        comment_binding: dict[int, int] = {}  # indeks baru → indeks lama
+        for index, rule in enumerate(rules):
+            old_index_opt: int | None = dipakai.get(index)
+            if old_index_opt is None:
                 fresh: dict[object, object] = {}
                 self._write_row(fresh, rule)
-                existing.insert(index, fresh)
+                new_items.append(fresh)
+                continue
+            old = old_items[old_index_opt]
+            if isinstance(old, MutableMapping):
+                extras = self._extra_keys(old)
+                if extras:
+                    notes.append(
+                        f"properti ingress baris {index + 1} "
+                        f"dipertahankan ({', '.join(extras)})"
+                    )
+                self._write_row(old, rule)
+                new_items.append(old)
+                comment_binding[index] = old_index
+            else:
+                # R-2 akurat: hanya baris non-pemetaan ini yang dilaporkan.
+                notes.append(
+                    f"baris ingress {index + 1} bukan pemetaan — "
+                    "diganti oleh nilai formulir"
+                )
+                fresh = {}
+                self._write_row(fresh, rule)
+                new_items.append(fresh)
 
-        while len(existing) > len(rules):
-            removed = existing.pop()
+        for old_index in sorted(terkonsumsi.symmetric_difference(
+            range(len(old_items)))
+        ):
+            removed = old_items[old_index]
             if isinstance(removed, Mapping):
-                extras = [
-                    str(key)
-                    for key in removed
-                    if key not in _MANAGED_INGRESS_KEYS
-                ]
+                extras = self._extra_keys(removed)
                 if extras:
                     notes.append(
                         "baris ingress yang dihapus formulir memuat "
@@ -234,11 +284,182 @@ class ConfigProposalBuilder:
                         "properti tersebut ikut terhapus"
                     )
 
-        if preserved_extras:
-            notes.append(
-                "properti ingress di luar formulir dipertahankan pada "
-                f"posisinya ({'; '.join(preserved_extras)})"
+        # Susun ulang isi list — objek list yang sama tetap menempel di
+        # dokumen (identitas node ruamel terjaga).
+        del existing[:]
+        existing.extend(new_items)
+
+        # R-1: pindahkan komentar-pre baris mengikuti identitas baris.
+        # Struktur ruamel (diverifikasi inspeksi): komentar sebelum baris-0
+        # = parent.ca.items['ingress'][3] + seq.ca.comment[1] (redundan);
+        # komentar sebelum baris-N>0 = post-comment (slot 2) kunci TERAKHIR
+        # item N-1. Komentar EOL berada di slot berbeda dan ikut objek item
+        # yang dipindah utuh.
+        self._caravan_pre_comments(
+            document, existing, old_items, comment_binding
+        )
+
+    @staticmethod
+    def _extra_keys(item: Mapping[object, object]) -> list[str]:
+        """Kunci item ingress di luar yang dikelola formulir (R-2)."""
+        return [
+            str(key) for key in item if key not in _MANAGED_INGRESS_KEYS
+        ]
+
+    @staticmethod
+    def _pre_tokens_of_old(
+        document: MutableMapping[object, object],
+        old_items: list[object],
+        old_index: int,
+    ) -> object | None:
+        """Ambil token komentar-pre milik baris asal ``old_index`` (R-1).
+
+        Mengembalikan **token tunggal** (bentuk dinormalisasi — sumber
+        berbeda konvensi: parent slot[3]/seq.comment[1] = list token,
+        slot[2] kunci = token tunggal).
+        """
+        if old_index == 0:
+            parent_slot = document.ca.items.get("ingress")  # type: ignore[attr-defined]
+            if parent_slot is not None and len(parent_slot) > 3:
+                if parent_slot[3] is not None:
+                    return ConfigProposalBuilder._as_single_token(parent_slot[3])
+            seq_ca = getattr(document.get("ingress"), "ca", None)
+            if seq_ca is not None and seq_ca.comment is not None:
+                tokens = seq_ca.comment
+                if len(tokens) > 1 and tokens[1] is not None:
+                    return ConfigProposalBuilder._as_single_token(tokens[1])
+            return None
+        prev = old_items[old_index - 1]
+        ca = getattr(prev, "ca", None)
+        if ca is None:
+            return None
+        for _key, slots in reversed(list(ca.items.items())):
+            if len(slots) > 2 and slots[2] is not None:
+                return slots[2]
+        return None
+
+    @staticmethod
+    def _as_single_token(container: object) -> object:
+        """Normalisasi kontainer komentar → token tunggal (R-1)."""
+        if isinstance(container, list):
+            if not container:
+                return None
+            if len(container) == 1:
+                return container[0]
+            # Multi-token: gabungkan nilai, mark diambil dari token awal.
+            from ruamel.yaml.comments import CommentToken  # type: ignore[attr-defined]
+
+            pertama = container[0]
+            nilai = "".join(
+                getattr(token, "value", "") for token in container
             )
+            return CommentToken(  # type: ignore[no-any-return]
+                nilai, pertama.start_mark, pertama.end_mark
+            )
+        return container
+
+    @staticmethod
+    def _set_pre_tokens_of_new(
+        document: MutableMapping[object, object],
+        seq: MutableSequence[object],
+        new_index: int,
+        token: object | None,
+    ) -> None:
+        """Tulis token komentar-pre ke baris final ``new_index`` (R-1).
+
+        Bentuk sesuai target: parent slot[3] & seq.comment[1] = list
+        token; slot[2] kunci terakhir item sebelumnya = token tunggal.
+        """
+        if token is None:
+            return
+        if new_index == 0:
+            parent_slot: list[object] | None = document.ca.items.get(  # type: ignore[attr-defined]
+                "ingress"
+            )
+            if parent_slot is None:
+                parent_slot = [None, None, None, None]
+                document.ca.items["ingress"] = parent_slot  # type: ignore[attr-defined]
+            while len(parent_slot) < 4:
+                parent_slot.append(None)
+            parent_slot[3] = [token]
+            seq_ca = getattr(seq, "ca", None)
+            if seq_ca is not None and hasattr(seq_ca, "comment"):
+                comment = list(seq_ca.comment) if seq_ca.comment else [None, None]
+                while len(comment) < 2:
+                    comment.append(None)
+                comment[1] = [token]
+                seq_ca.comment = comment
+            return
+        prev = seq[new_index - 1]
+        ca = getattr(prev, "ca", None)
+        if ca is None:
+            return
+        keys = list(ca.items.keys())
+        if not keys:
+            return
+        last_key = keys[-1]
+        slots = ca.items[last_key]
+        while len(slots) < 3:
+            slots.append(None)
+        slots[2] = token
+
+    @classmethod
+    def _caravan_pre_comments(
+        cls,
+        document: MutableMapping[object, object],
+        seq: MutableSequence[object],
+        old_items: list[object],
+        comment_binding: Mapping[int, int],
+    ) -> None:
+        """Pindahkan komentar-pre: baris final menerima komentar baris
+        asalnya; komentar baris yang dihapus dibuang; baris baru tanpa
+        komentar — tanpa yatim, tanpa perpindahan salah (R-1)."""
+        seq_ca = getattr(seq, "ca", None)
+
+        def kosongkan_header() -> None:
+            parent_slot = document.ca.items.get("ingress")  # type: ignore[attr-defined]
+            if parent_slot is not None and len(parent_slot) > 3:
+                parent_slot[3] = None
+            if seq_ca is not None and hasattr(seq_ca, "comment"):
+                seq_ca.comment = [None, None]
+
+        def kosongkan_pre(item: object) -> None:
+            ca = getattr(item, "ca", None)
+            if ca is None:
+                return
+            for slots in ca.items.values():
+                if len(slots) > 2:
+                    slots[2] = None
+
+        # Baca semua token lama SEBELUM menulis (struktur masih utuh).
+        tokens_per_old: dict[int, object] = {}
+        for old_index in range(len(old_items)):
+            tokens = cls._pre_tokens_of_old(document, old_items, old_index)
+            if tokens is not None:
+                tokens_per_old[old_index] = tokens
+
+        if not tokens_per_old:
+            return  # tidak ada komentar-pre — tidak ada yang dipindah
+
+        # Bersihkan seluruh posisi lama (parent/seq + tiap item).
+        kosongkan_header()
+        for item in old_items:
+            kosongkan_pre(item)
+
+        # Tulis komentar ke baris final sesuai binding.
+        for new_index in range(len(seq)):
+            old_index_opt: int | None = comment_binding.get(new_index)
+            tokens = (
+                tokens_per_old.get(old_index_opt)
+                if old_index_opt is not None
+                else None
+            )
+            if tokens is not None:
+                cls._set_pre_tokens_of_new(document, seq, new_index, tokens)
+            elif new_index == 0:
+                kosongkan_header()  # baris 0 baru — hapus pre yatim
+            else:
+                kosongkan_pre(seq[new_index - 1])  # hapus pre yatim
 
     @staticmethod
     def _write_row(

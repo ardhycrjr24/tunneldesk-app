@@ -134,11 +134,20 @@ class SetupWizardDialog(QDialog):
         # thread berjalan — pelajaran uji double-submission).
         self._refresh_buttons()
 
+    def _safe_message(self, message: str) -> str:
+        """Sanitasi pesan gagal sebelum tampil (R-3): exception mentah
+        tidak pernah ditampilkan — RedactionEngine E-1 + kerangka pesan
+        standar agar informatif dan dapat ditindaklanjuti."""
+        return strings.text(
+            "err.operation_failed",
+            detail=self._services.redaction.redact(message),
+        )
+
     def _on_worker_failed(self, message: str) -> None:
         self._worker = None
         self._refresh_buttons()
         QMessageBox.warning(
-            self, strings.text("wiz.title"), message
+            self, strings.text("wiz.title"), self._safe_message(message)
         )
 
     def _busy(self) -> bool:
@@ -287,7 +296,9 @@ class SetupWizardDialog(QDialog):
         def failed(message: str) -> None:
             self._worker = None
             self._refresh_buttons()
-            self._page_pilih.show_error(message)
+            self._page_pilih.show_error(
+                self._services.redaction.redact(message)
+            )
 
         self._run_with_failure(read, done, failed)
 
@@ -354,7 +365,9 @@ class SetupWizardDialog(QDialog):
         def failed(message: str) -> None:
             self._worker = None
             self._refresh_buttons()
-            QMessageBox.warning(self, strings.text("wiz.title"), message)
+            QMessageBox.warning(
+                self, strings.text("wiz.title"), self._safe_message(message)
+            )
 
         self._run_with_failure(build, done, failed)
 
@@ -389,7 +402,10 @@ class SetupWizardDialog(QDialog):
             QMessageBox.warning(
                 self,
                 strings.text("wiz.title"),
-                strings.text("wiz.err.rejected", reason=message),
+                strings.text(
+                    "wiz.err.rejected",
+                    reason=self._services.redaction.redact(message),
+                ),
             )
 
         self._run_with_failure(make, done, failed)
@@ -415,7 +431,9 @@ class SetupWizardDialog(QDialog):
         def failed(message: str) -> None:
             self._worker = None
             self._refresh_buttons()
-            QMessageBox.warning(self, strings.text("wiz.title"), message)
+            QMessageBox.warning(
+                self, strings.text("wiz.title"), self._safe_message(message)
+            )
 
         self._run_with_failure(prepare, done, failed)
 
@@ -445,7 +463,9 @@ class SetupWizardDialog(QDialog):
         def failed(message: str) -> None:
             self._worker = None
             self._refresh_buttons()
-            QMessageBox.warning(self, strings.text("wiz.title"), message)
+            QMessageBox.warning(
+                self, strings.text("wiz.title"), self._safe_message(message)
+            )
 
         self._run_with_failure(do_apply, done, failed)
 

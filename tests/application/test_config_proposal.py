@@ -179,3 +179,94 @@ def test_prefill_dari_dokumen() -> None:
         IngressRule(hostname="rapor.sekolah.sch.id", service="http://localhost:8080"),
         IngressRule(service="http_status:404"),
     )
+
+
+# ----------------------------------------------------------------------
+# Remediasi audit Task 2.6 — R-1 (Y-1) & R-2 (Y-2)
+# ----------------------------------------------------------------------
+KOMENTAR = (
+    "tunnel: t\n"
+    "credentials-file: c.json\n"
+    "ingress:\n"
+    "  # ingress utama e-rapor\n"
+    "  - hostname: a.sch.id\n"
+    "    service: http://localhost:8080\n"
+    "  # catch-all pengaman\n"
+    "  - service: http_status:404\n"
+)
+
+
+def test_r1_e7_komentar_tidak_berpindah_saat_insert() -> None:
+    """Repro E-7: tambah baris tengah — komentar tetap melekat barisnya;
+    baris baru tanpa komentar (keputusan remediasi R-1)."""
+    p = WizardProposal("t", "c.json", (
+        IngressRule(hostname="a.sch.id", service="http://localhost:8080"),
+        IngressRule(hostname="b.sch.id", service="http://localhost:8081"),
+        IngressRule(service="http_status:404"),
+    ))
+    result = builder.build(KOMENTAR, p)
+    assert result.ok
+    teks = result.proposed_text or ""
+    assert teks.find("# ingress utama") < teks.find("a.sch.id")
+    assert teks.find("# catch-all") < teks.find("http_status:404")
+    segmen_baru = teks.split("b.sch.id")[1].split("http_status")[0]
+    assert "# catch-all" not in segmen_baru
+
+
+def test_r1_e8_tanpa_komentar_yatim_saat_hapus() -> None:
+    """Repro E-8: hapus baris pertama — komentarnya ikut pergi (tanpa
+    yatim); komentar catch-all mengikuti baris catch-all tersisa."""
+    p = WizardProposal("t", "c.json", (IngressRule(service="http_status:404"),))
+    result = builder.build(KOMENTAR, p)
+    assert result.ok
+    teks = result.proposed_text or ""
+    assert "# ingress utama" not in teks
+    assert teks.find("# catch-all") < teks.find("http_status:404")
+
+
+def test_r1_eol_comment_ikut_barisnya() -> None:
+    """Komentar EOL (di baris item) tidak hilang saat baris dimutasi."""
+    dengan_eol = (
+        "tunnel: t\n"
+        "credentials-file: c.json\n"
+        "ingress:\n"
+        "  - service: http://localhost:8080  # catatan eol utama\n"
+    )
+    p = WizardProposal("t", "c.json", (
+        IngressRule(service="http://127.0.0.1:9090"),
+    ))
+    result = builder.build(dengan_eol, p)
+    assert result.ok
+    teks = result.proposed_text or ""
+    baris = [b for b in teks.splitlines() if "9090" in b]
+    assert baris and "catatan eol utama" in baris[0]
+
+
+def test_r2_e1_notes_akurat_item_bukan_pemetaan() -> None:
+    """Repro E-1: item ingress bukan pemetaan — tepat satu catatan
+    'bukan pemetaan' untuk baris yang benar; konten akhir benar."""
+    asal = (
+        "tunnel: t\n"
+        "credentials-file: c.json\n"
+        "ingress:\n"
+        "  - 42\n"
+        "  - hostname: a.sch.id\n"
+        "    service: http://localhost:8080\n"
+        "  - service: http_status:404\n"
+    )
+    p = WizardProposal("t", "c.json", (
+        IngressRule(service="http://localhost:9001"),
+        IngressRule(hostname="a.sch.id", service="http://localhost:8080"),
+        IngressRule(service="http_status:404"),
+    ))
+    result = builder.build(asal, p)
+    assert result.ok
+    klaim_salah = [
+        n for n in result.notes
+        if "bukan pemetaan" in n and ("baris 2" in n or "baris 3" in n)
+    ]
+    assert klaim_salah == []  # tidak ada diagnosis menyesatkan (R-2)
+    assert sum("bukan pemetaan" in n for n in result.notes) == 1
+    teks = result.proposed_text or ""
+    assert "42" not in teks
+    assert "9001" in teks and "a.sch.id" in teks and "http_status:404" in teks

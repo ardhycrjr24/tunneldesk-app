@@ -37,6 +37,7 @@ from tunneldesk.domain.diagnostics.origin import (
     classify_probe_outcome,
     origin_target_from_service,
 )
+from tunneldesk.domain.redaction.engine import RedactionEngine
 from tunneldesk.domain.tunnel.process_contracts import ProcessLauncher
 from tunneldesk.infrastructure.config_io.config_writer import (
     AtomicConfigFileWriter,
@@ -70,6 +71,8 @@ class WizardServices:
     backup: BackupService
     probe: OriginProbe
     settings_store: SettingsStore
+    #: Mesin redaksi UI (R-3): semua pesan gagal worker disanitasi sebelum tampil.
+    redaction: RedactionEngine
 
 
 def actual_deny_prefixes(settings: AppSettings) -> tuple[Path, ...]:
@@ -131,6 +134,7 @@ def build_wizard_services(
         backup=backup,
         probe=SocketOriginProbe(),
         settings_store=settings_store,
+        redaction=RedactionEngine(),
     )
 
 

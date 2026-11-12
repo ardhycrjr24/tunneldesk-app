@@ -260,3 +260,39 @@ def test_halaman_hasil_rollback_sukses_bukan_kritis() -> None:
     page.refresh(outcome, "")
     assert "KRITIS" not in page._status_label.text()  # noqa: SLF001
     assert "dikembalikan otomatis" in page._status_label.text()  # noqa: SLF001
+
+
+def test_r3_exception_internal_tidak_tampil_mentah(
+    tmp_path: Path, qtbot: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Repro R-3/Y-3: exception internal berisi token → UI menampilkan
+    versi tersanitasi (RedactionEngine), bukan teks mentah."""
+    from PySide6.QtWidgets import QMessageBox
+
+    dialog, _store = make_dialog(tmp_path, qtbot)
+    target = tmp_path / "config.yml"
+    target.write_bytes(VALID_CONFIG.encode("utf-8"))
+    token = "rahasia-dummy-wizard-1234567890"
+    dialog._services.redaction.register_secret(token, "SIMULASI")  # noqa: SLF001
+
+    tampil: list[str] = []
+    monkeypatch.setattr(
+        QMessageBox, "warning", lambda *a, **k: tampil.append(str(a[-1]))
+    )
+    def validate_pecah(path: Path):  # type: ignore[no-untyped-def]
+        raise RuntimeError(f"baca konfigurasi gagal dekat {token}")
+
+    monkeypatch.setattr(
+        dialog._services.validator, "validate_path", validate_pecah
+    )
+    dialog._page_pilih.set_path(target)  # noqa: SLF001
+    dialog.next_button().click()  # 0 → 1
+    _tunggu(dialog, qtbot, 1)
+    dialog.next_button().click()  # 1 → worker gagal → show_error halaman
+    qtbot.waitUntil(lambda: not dialog.is_busy(), timeout=10000)
+
+    # Jalur gagal langkah 2 = tampil di halaman pilih (tersanitasi R-3).
+    pilih = dialog.pages()["pilih"]
+    teks = pilih._status_label.text()  # noqa: SLF001
+    assert token not in teks  # token tidak tampil mentah (R-3)
+    assert "File tidak dapat dibaca" in teks  # kerangka pesan standar

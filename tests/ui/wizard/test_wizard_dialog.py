@@ -289,10 +289,13 @@ def test_r3_exception_internal_tidak_tampil_mentah(
     dialog.next_button().click()  # 0 → 1
     _tunggu(dialog, qtbot, 1)
     dialog.next_button().click()  # 1 → worker gagal → show_error halaman
-    qtbot.waitUntil(lambda: not dialog.is_busy(), timeout=10000)
-
-    # Jalur gagal langkah 2 = tampil di halaman pilih (tersanitasi R-3).
+    # Tunggu kondisi AKHIR (label terisi) — bukan sekadar worker selesai:
+    # callback `failed` queued ke main thread dapat dieksekusi SETELAH
+    # thread worker berhenti (race teramati di CI macOS).
     pilih = dialog.pages()["pilih"]
+    qtbot.waitUntil(
+        lambda: pilih._status_label.text() != "", timeout=20000  # noqa: SLF001
+    )
     teks = pilih._status_label.text()  # noqa: SLF001
     assert token not in teks  # token tidak tampil mentah (R-3)
     assert "File tidak dapat dibaca" in teks  # kerangka pesan standar

@@ -25,6 +25,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, MutableMapping, MutableSequence
 from dataclasses import dataclass
+from typing import cast
 
 from tunneldesk.infrastructure.config_io.yaml_parser import RoundTripYamlParser
 
@@ -311,23 +312,29 @@ class ConfigProposalBuilder:
         document: MutableMapping[object, object],
         old_items: list[object],
         old_index: int,
-    ) -> object | None:
+    ) -> list[object] | None:
         """Ambil token komentar-pre milik baris asal ``old_index`` (R-1).
 
-        Mengembalikan **token tunggal** (bentuk dinormalisasi — sumber
-        berbeda konvensi: parent slot[3]/seq.comment[1] = list token,
-        slot[2] kunci = token tunggal).
+        Mengembalikan **list token** (bentuk dinormalisasi — seluruh token
+        dipertahankan dan berurutan; R-1b): baris-0 = ``parent.ca.items
+        ['ingress'][3]`` / ``seq.ca.comment[1]`` (keduanya memang list);
+        baris-N>0 = slot[2] kunci terakhir item sebelumnya (token tunggal
+        → dibungkus list agar seragam). Struktur tak terduga → ``None``
+        (fail-safe: komentar tidak dipindah, tanpa crash).
         """
         if old_index == 0:
             parent_slot = document.ca.items.get("ingress")  # type: ignore[attr-defined]
             if parent_slot is not None and len(parent_slot) > 3:
-                if parent_slot[3] is not None:
-                    return ConfigProposalBuilder._as_single_token(parent_slot[3])
+                normalized = ConfigProposalBuilder._as_token_list(parent_slot[3])
+                if normalized:
+                    return normalized
             seq_ca = getattr(document.get("ingress"), "ca", None)
             if seq_ca is not None and seq_ca.comment is not None:
                 tokens = seq_ca.comment
                 if len(tokens) > 1 and tokens[1] is not None:
-                    return ConfigProposalBuilder._as_single_token(tokens[1])
+                    normalized = ConfigProposalBuilder._as_token_list(tokens[1])
+                    if normalized:
+                        return normalized
             return None
         prev = old_items[old_index - 1]
         ca = getattr(prev, "ca", None)
@@ -335,42 +342,42 @@ class ConfigProposalBuilder:
             return None
         for _key, slots in reversed(list(ca.items.items())):
             if len(slots) > 2 and slots[2] is not None:
-                return slots[2]
+                normalized = ConfigProposalBuilder._as_token_list(slots[2])
+                if normalized:
+                    return normalized
         return None
 
     @staticmethod
-    def _as_single_token(container: object) -> object:
-        """Normalisasi kontainer komentar → token tunggal (R-1)."""
-        if isinstance(container, list):
-            if not container:
-                return None
-            if len(container) == 1:
-                return container[0]
-            # Multi-token: gabungkan nilai, mark diambil dari token awal.
-            from ruamel.yaml.comments import CommentToken  # type: ignore[attr-defined]
+    def _as_token_list(container: object) -> list[object] | None:
+        """Normalisasi kontainer komentar → **list token** (R-1b).
 
-            pertama = container[0]
-            nilai = "".join(
-                getattr(token, "value", "") for token in container
-            )
-            return CommentToken(  # type: ignore[no-any-return]
-                nilai, pertama.start_mark, pertama.end_mark
-            )
-        return container
+        List dipertahankan utuh (seluruh token + urutan — perbaikan
+        Y-1b: import ``CommentToken`` kini dari ``ruamel.yaml.tokens``
+        dan HANYA dipakai untuk target slot[2] yang berkonvensi token
+        tunggal). Struktur tak dikenal → ``None`` (fail-safe).
+        """
+        if isinstance(container, list):
+            return list(container)  # salin — token asli + urutan utuh
+        if hasattr(container, "value") and hasattr(container, "start_mark"):
+            return [container]  # token tunggal → dibungkus list
+        return None  # struktur tak terduga → fail-safe
 
     @staticmethod
     def _set_pre_tokens_of_new(
         document: MutableMapping[object, object],
         seq: MutableSequence[object],
         new_index: int,
-        token: object | None,
+        tokens: list[object] | None,
     ) -> None:
         """Tulis token komentar-pre ke baris final ``new_index`` (R-1).
 
         Bentuk sesuai target: parent slot[3] & seq.comment[1] = list
-        token; slot[2] kunci terakhir item sebelumnya = token tunggal.
+        token (ditulis utuh — multi-token dipertahankan); slot[2] kunci
+        terakhir item sebelumnya = token tunggal (bila list multi-token,
+        nilai digabung ke satu ``CommentToken`` baru dari
+        ``ruamel.yaml.tokens`` — seluruh teks + urutan terjaga).
         """
-        if token is None:
+        if not tokens:
             return
         if new_index == 0:
             parent_slot: list[object] | None = document.ca.items.get(  # type: ignore[attr-defined]
@@ -381,13 +388,13 @@ class ConfigProposalBuilder:
                 document.ca.items["ingress"] = parent_slot  # type: ignore[attr-defined]
             while len(parent_slot) < 4:
                 parent_slot.append(None)
-            parent_slot[3] = [token]
+            parent_slot[3] = list(tokens)  # utuh — multi-token dipertahankan
             seq_ca = getattr(seq, "ca", None)
             if seq_ca is not None and hasattr(seq_ca, "comment"):
                 comment = list(seq_ca.comment) if seq_ca.comment else [None, None]
                 while len(comment) < 2:
                     comment.append(None)
-                comment[1] = [token]
+                comment[1] = list(tokens)  # utuh
                 seq_ca.comment = comment
             return
         prev = seq[new_index - 1]
@@ -401,7 +408,22 @@ class ConfigProposalBuilder:
         slots = ca.items[last_key]
         while len(slots) < 3:
             slots.append(None)
-        slots[2] = token
+        if len(tokens) == 1:
+            slots[2] = tokens[0]
+        else:
+            # Target slot[2] berkonvensi token tunggal; multi-token →
+            # gabungkan NILAI ke satu CommentToken baru (ruamel.yaml.tokens)
+            # — seluruh teks + urutan terjaga (R-1b). Jalur ini hanya
+            # terjangkau via reorder (tak tersedia di UI) — defensif.
+            from ruamel.yaml.tokens import CommentToken
+
+            pertama = cast("CommentToken", tokens[0])
+            nilai = "".join(
+                getattr(item, "value", "") for item in tokens
+            )
+            slots[2] = CommentToken(
+                nilai, pertama.start_mark, pertama.end_mark
+            )
 
     @classmethod
     def _caravan_pre_comments(
@@ -432,7 +454,7 @@ class ConfigProposalBuilder:
                     slots[2] = None
 
         # Baca semua token lama SEBELUM menulis (struktur masih utuh).
-        tokens_per_old: dict[int, object] = {}
+        tokens_per_old: dict[int, list[object]] = {}
         for old_index in range(len(old_items)):
             tokens = cls._pre_tokens_of_old(document, old_items, old_index)
             if tokens is not None:

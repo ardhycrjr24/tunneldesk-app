@@ -270,3 +270,56 @@ def test_r2_e1_notes_akurat_item_bukan_pemetaan() -> None:
     teks = result.proposed_text or ""
     assert "42" not in teks
     assert "9001" in teks and "a.sch.id" in teks and "http_status:404" in teks
+
+
+# ----------------------------------------------------------------------
+# Remediasi akhir Task 2.6 — R-1b (Y-1b): komentar multi-token
+# ----------------------------------------------------------------------
+MULTILINE = (
+    "tunnel: t\n"
+    "credentials-file: c.json\n"
+    "ingress:\n"
+    "  # baris komentar pertama\n"
+    "  # baris komentar kedua\n"
+    "  - hostname: a.sch.id\n"
+    "    service: http://localhost:8080\n"
+)
+
+
+def test_r1b_a_multiline_pre_comment_utuh_dan_terurut() -> None:
+    """Test A (repro A3/A7): komentar multi-baris sebelum ingress pertama —
+    build BERHASIL (sebelumnya ImportError CommentToken), seluruh komentar
+    tampil berurutan, hasil dapat di-parse kembali."""
+    result = builder.build(MULTILINE, WizardProposal(
+        "t", "c.json", (
+            IngressRule(hostname="a.sch.id", service="http://localhost:8080"),
+        ),
+    ))
+    assert result.ok  # sebelum fix: ImportError ruamel.yaml.comments
+    teks = result.proposed_text or ""
+    i1, i2 = teks.find("# baris komentar pertama"), teks.find("# baris komentar kedua")
+    assert 0 <= i1 < i2 < teks.find("a.sch.id")  # seluruh komentar + urutan
+    # Dapat di-parse kembali tanpa kesalahan sintaks.
+    parsed = builder._parser.parse(teks)  # noqa: SLF001
+    assert parsed.syntax_errors == ()
+    assert parsed.document is not None
+
+
+def test_r1b_b_mutasi_multiline_terikat_benar() -> None:
+    """Test B: form mengedit baris pertama + menambah baris kedua —
+    komentar multi-baris tetap terikat ingress pertama yang diedit;
+    tanpa ImportError; tanpa komentar yatim/hilang."""
+    result = builder.build(MULTILINE, WizardProposal(
+        "t", "c.json", (
+            IngressRule(hostname="a.sch.id", service="http://127.0.0.1:9090"),
+            IngressRule(service="http_status:404"),
+        ),
+    ))
+    assert result.ok  # sebelum fix: ImportError
+    teks = result.proposed_text or ""
+    i_utama = teks.find("# baris komentar pertama")
+    assert 0 <= i_utama < teks.find("a.sch.id")  # terikat ingress pertama
+    assert "127.0.0.1:9090" in teks  # perubahan form diterapkan
+    assert "http_status:404" in teks  # baris baru ditambahkan
+    parsed = builder._parser.parse(teks)  # noqa: SLF001
+    assert parsed.syntax_errors == ()  # dapat di-parse kembali

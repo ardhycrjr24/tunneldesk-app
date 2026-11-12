@@ -22,6 +22,7 @@ __all__ = [
     "OriginCheckResult",
     "OriginProbe",
     "validate_origin_target",
+    "origin_target_from_service",
     "classify_probe_outcome",
     "classify_probe_error",
 ]
@@ -108,6 +109,62 @@ class OriginProbe(Protocol):
 def validate_origin_target(target: OriginTarget) -> str | None:
     """Validasi konfigurasi origin (PRD-01 §7.4). None berarti valid."""
     return target.validation_error()
+
+
+def origin_target_from_service(
+    service: str,
+) -> tuple[OriginTarget | None, str | None]:
+    """Petakan nilai ``service`` ingress → :class:`OriginTarget`.
+
+    Komponen baru Task 2.6 (keputusan PC-2, disetujui 2026-11-13) — fungsi
+    murni atas teks, tanpa I/O. Kontrak hasil (tuple):
+
+    - ``(target, None)``  — service dapat diprobe (http/https).
+    - ``(None, None)``    — service catch-all (``http_status:``) — **bukan**
+      error; pemanggil melewatinya dengan catatan.
+    - ``(None, pesan)``   — tidak dapat dipetakan (scheme tidak didukung /
+      URL rusak / port tidak valid); pesan aman untuk ditampilkan.
+
+    Port tanpa nilai eksplisit mengikuti semantik URL standar
+    (http=80, https=443) — konstanta protokol, bukan asumsi deployment.
+    Pemanggil TIDAK boleh mengasumsikan baris ingress pertama adalah
+    target aktif (keputusan PC-2): baris mana pun yang dapat dipetakan
+    diperiksa masing-masing, dan keambiguanan multi-origin ditangani
+    eksplisit oleh pemanggil.
+    """
+    import urllib.parse
+
+    normalized = service.strip() if isinstance(service, str) else ""
+    if not normalized:
+        return None, "nilai service kosong"
+    if normalized.startswith("http_status:"):
+        return None, None  # catch-all — bukan origin lokal, dilewati
+
+    try:
+        parsed = urllib.parse.urlparse(normalized)
+    except ValueError as exc:
+        return None, f"service tidak dapat dibaca: {exc}"
+
+    if parsed.scheme not in ("http", "https"):
+        ringkas = normalized if len(normalized) <= 40 else normalized[:37] + "..."
+        return None, f"service tidak didukung untuk pemeriksaan origin: {ringkas}"
+    if not parsed.hostname:
+        return None, "host origin tidak ditemukan dalam service"
+
+    try:
+        port = parsed.port
+    except ValueError:
+        return None, "port origin tidak valid (di luar rentang 1-65535 atau bukan angka)"
+    if port is None:
+        port = 80 if parsed.scheme == "http" else 443
+
+    target = OriginTarget(
+        host=parsed.hostname, port=port, scheme=parsed.scheme
+    )
+    error = target.validation_error()
+    if error is not None:
+        return None, error
+    return target, None
 
 
 def classify_probe_outcome(

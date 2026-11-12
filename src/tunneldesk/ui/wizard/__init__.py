@@ -1,1 +1,1 @@
-"""Setup Wizard: prasyarat → validasi → preview → konfirmasi → apply (PRD-01 §7.4). Rencana: E-8."""
+"""Setup Wizard UI (Task 2.6, PRD-01 §7.4)."""

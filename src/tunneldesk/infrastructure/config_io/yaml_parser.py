@@ -72,6 +72,13 @@ class RoundTripYamlParser:
             emitted_text=emitted,
         )
 
+    def emit(self, document: object) -> str | None:
+        """Emit ulang dokumen dengan konfigurasi emitter YANG SAMA (aditif,
+        Task 2.6/PC-1). Dipakai ``ConfigProposalBuilder`` setelah mutasi
+        terkendali agar teks usulan dihasilkan oleh emitter identik —
+        tanpa serialisasi ulang berbasis konfigurasi tandingan."""
+        return self._emit(document)
+
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------

@@ -109,6 +109,9 @@ class DashboardWindow(QMainWindow):
         self._origin_button = QPushButton(
             strings.text("dash.btn_check_origin"), central
         )
+        self._wizard_button = QPushButton(
+            strings.text("dash.btn_wizard"), central
+        )
         self._settings_button = QPushButton(
             strings.text("menu.settings"), central
         )
@@ -117,6 +120,7 @@ class DashboardWindow(QMainWindow):
             self._stop_button,
             self._restart_button,
             self._origin_button,
+            self._wizard_button,
             self._settings_button,
         ):
             buttons_layout.addWidget(button)
@@ -133,6 +137,7 @@ class DashboardWindow(QMainWindow):
         self._stop_button.clicked.connect(self._on_stop)
         self._restart_button.clicked.connect(self._on_restart)
         self._origin_button.clicked.connect(self._on_check_origin)
+        self._wizard_button.clicked.connect(self._on_open_wizard)
         self._settings_button.clicked.connect(self._on_open_settings)
 
         self.setCentralWidget(central)
@@ -263,6 +268,17 @@ class DashboardWindow(QMainWindow):
 
     def _on_open_settings(self) -> None:
         dialog = SettingsDialog(self._settings_store, self)
+        dialog.exec()
+        self._refresh_status()
+
+    def _on_open_wizard(self) -> None:
+        """Buka Setup Wizard (Task 2.6) — komposisi layanan dengan
+        deny-prefix direktori data AKTUAL (T-2)."""
+        from tunneldesk.ui.wizard.services import build_wizard_services
+        from tunneldesk.ui.wizard.wizard_dialog import SetupWizardDialog
+
+        services = build_wizard_services(self._settings_store)
+        dialog = SetupWizardDialog(services, self)
         dialog.exec()
         self._refresh_status()
 

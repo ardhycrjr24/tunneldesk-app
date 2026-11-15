@@ -1,1 +1,1 @@
-"""Halaman diagnostik dan pratinjau laporan sebelum ekspor (PRD-01 §7.5). Rencana: E-9."""
+"""UI Diagnostik (Task 2.7, PRD-01 §7.5)."""

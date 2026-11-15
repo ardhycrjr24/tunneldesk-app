@@ -112,6 +112,9 @@ class DashboardWindow(QMainWindow):
         self._wizard_button = QPushButton(
             strings.text("dash.btn_wizard"), central
         )
+        self._diag_button = QPushButton(
+            strings.text("dash.btn_diag"), central
+        )
         self._settings_button = QPushButton(
             strings.text("menu.settings"), central
         )
@@ -121,6 +124,7 @@ class DashboardWindow(QMainWindow):
             self._restart_button,
             self._origin_button,
             self._wizard_button,
+            self._diag_button,
             self._settings_button,
         ):
             buttons_layout.addWidget(button)
@@ -138,6 +142,7 @@ class DashboardWindow(QMainWindow):
         self._restart_button.clicked.connect(self._on_restart)
         self._origin_button.clicked.connect(self._on_check_origin)
         self._wizard_button.clicked.connect(self._on_open_wizard)
+        self._diag_button.clicked.connect(self._on_open_diagnostics)
         self._settings_button.clicked.connect(self._on_open_settings)
 
         self.setCentralWidget(central)
@@ -281,6 +286,15 @@ class DashboardWindow(QMainWindow):
         dialog = SetupWizardDialog(services, self)
         dialog.exec()
         self._refresh_status()
+
+    def _on_open_diagnostics(self) -> None:
+        """Buka dialog Diagnostik (Task 2.7, P-1) — on-demand (P-5)."""
+        from tunneldesk.ui.diagnostics.diagnostics_dialog import (
+            DiagnosticsDialog,
+        )
+
+        dialog = DiagnosticsDialog(self._controller, self._settings_store, self)
+        dialog.exec()
 
     # ------------------------------------------------------------------
     # Akses untuk uji (pytest-qt)

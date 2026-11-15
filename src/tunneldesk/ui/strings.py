@@ -36,6 +36,7 @@ ID: dict[str, str] = {
     "menu.file": "Berkas",
     "menu.exit": "Keluar",
     "dash.btn_wizard": "Setup Wizard…",
+    "dash.btn_diag": "Diagnostik…",
     "settings.title": "Pengaturan",
     "settings.fld_cloudflared": "Lokasi cloudflared:",
     "settings.fld_config": "Lokasi file konfigurasi:",
@@ -138,6 +139,23 @@ ID: dict[str, str] = {
     "wiz.st.rollback_failed": "KRITIS: rollback GAGAL — kondisi file tidak "
     "dapat dikembalikan otomatis. Pulihkan manual dari backup di bawah.",
     "wiz.err.rejected": "Preview ditolak: {reason}",
+    # ------------------------------------------------------------------
+    # Diagnostik (Task 2.7, PRD-01 §7.5) — Q-06
+    # ------------------------------------------------------------------
+    "diag.title": "Diagnostik — TunnelDesk",
+    "diag.run": "Jalankan Diagnostik",
+    "diag.running": "pemeriksaan berjalan…",
+    "diag.export_txt": "Ekspor TXT…",
+    "diag.copy": "Salin ke Clipboard",
+    "diag.export_locked": "Jalankan diagnostik terlebih dahulu — laporan "
+    "harus ditinjau sebelum disalin atau dibagikan (PRD-01 §7.5).",
+    "diag.report_title": "Laporan (tinjau sebelum ekspor):",
+    "diag.export_ok": "Laporan tersimpan: {path}",
+    "diag.export_failed": "Ekspor gagal: {detail}",
+    "diag.copy_ok": "Laporan disalin ke clipboard.",
+    "diag.copy_failed": "Penyalinan gagal: {detail}",
+    "diag.close_busy": "Pemeriksaan sedang berjalan — tunggu hingga selesai.",
+    "diag.err.failed": "Diagnostik gagal: {detail}",
 }
 
 

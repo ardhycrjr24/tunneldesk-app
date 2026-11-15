@@ -8,6 +8,7 @@ tidak ada (default mati, PRD-01 §7.7).
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
+    QCheckBox,
     QDialog,
     QFormLayout,
     QHBoxLayout,
@@ -47,6 +48,16 @@ class SettingsDialog(QDialog):
         form.addRow(strings.text("settings.fld_backup_dir"), self._backup_field)
         layout.addLayout(form)
 
+        # Task 2.9/D-29.3: preferensi masking — hanya disimpan & ditampilkan
+        # di sini; TIDAK dikonsumsi jalur runtime mana pun (tanpa kaitan
+        # checkbox diagnostik 2.8).
+        self._mask_checkbox = QCheckBox(strings.text("settings.fld_mask"), self)
+        self._mask_checkbox.setChecked(self._settings.mask_hostnames)
+        layout.addWidget(self._mask_checkbox)
+        self._mask_hint_label = QLabel(strings.text("settings.mask_hint"), self)
+        self._mask_hint_label.setWordWrap(True)
+        layout.addWidget(self._mask_hint_label)
+
         self._note_label = QLabel(strings.text("settings.note"), self)
         self._note_label.setWordWrap(True)
         layout.addWidget(self._note_label)
@@ -67,6 +78,7 @@ class SettingsDialog(QDialog):
                 config_path=self._config_field.text().strip(),
                 log_dir=self._log_field.text().strip(),
                 backup_dir=self._backup_field.text().strip(),
+                mask_hostnames=self._mask_checkbox.isChecked(),
             )
         )
         self._note_label.setText(strings.text("settings.saved"))
@@ -93,3 +105,10 @@ class SettingsDialog(QDialog):
         for key, widget in mapping.items():
             if key in values:
                 widget.setText(values[key])
+
+    # Akses uji preferensi masking (Task 2.9)
+    def mask_checked(self) -> bool:
+        return self._mask_checkbox.isChecked()
+
+    def set_mask_checked(self, value: bool) -> None:
+        self._mask_checkbox.setChecked(value)

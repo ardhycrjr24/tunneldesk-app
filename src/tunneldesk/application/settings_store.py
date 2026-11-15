@@ -40,6 +40,7 @@ class AppSettings:
     config_path: str = ""
     log_dir: str = ""
     backup_dir: str = ""
+    mask_hostnames: bool = False  # Task 2.9/D-29.1: preferensi penyamaran (opt-in)
     origin_host: str = ""   # kosong → MISCONFIGURED (E-6 akan isi dari YAML)
     origin_port: int = 0
     language: str = "id"    # Q-06: Indonesia utama; EN siap ditambahkan
@@ -80,6 +81,13 @@ class JsonSettingsStore:
                     values[key] = int(value)  # type: ignore[arg-type]
                 except (TypeError, ValueError):
                     continue
+            elif key == "mask_hostnames":
+                # Task 2.9: boolean wajib dibaca eksplisit — filter str
+                # di bawah akan melupakan bool. Tipe salah (str/int/null)
+                # → kunci dilewati → default False. isinstance(value, bool)
+                # menolak int (bool adalah subclass int, sebaliknya tidak).
+                if isinstance(value, bool):
+                    values[key] = value
             elif hasattr(known, key) and isinstance(value, str):
                 values[key] = value
         return known.with_updates(**values)

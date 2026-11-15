@@ -42,6 +42,13 @@ ID: dict[str, str] = {
     "settings.fld_config": "Lokasi file konfigurasi:",
     "settings.fld_log_dir": "Direktori log:",
     "settings.fld_backup_dir": "Direktori backup:",
+    "settings.fld_mask": "Sembunyikan hostname pada laporan diagnostik",
+    # Task 2.9/§4.3 — teks final plan; tanpa klaim efek runtime (D-29.3).
+    "settings.mask_hint": (
+        "Preferensi ini disimpan di TunnelDesk dan ditampilkan di Pengaturan. "
+        "Saat ini preferensi belum mengubah perilaku aplikasi; "
+        "penerapannya ditentukan keputusan berikutnya."
+    ),
     "settings.note": "Perubahan lokasi disimpan segera dan berlaku untuk sesi berikutnya.",
     "settings.saved": "Tersimpan.",
     "btn.save": "Simpan",

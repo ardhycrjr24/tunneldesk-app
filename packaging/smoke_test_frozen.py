@@ -32,6 +32,12 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 DIST_APP = REPO_ROOT / "dist" / "TunnelDesk"
 EXE = DIST_APP / "TunnelDesk.exe"
 
+# Konsol Windows default cp1252 — label output memakai karakter non-ASCII
+# (≥, —); paksa UTF-8 agar tidak UnicodeEncodeError di runner.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 failures: list[str] = []
 
 

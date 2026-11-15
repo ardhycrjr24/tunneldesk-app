@@ -28,6 +28,9 @@ dev = [
     "mypy>=1.10",
     "import-linter>=2.0",
 ]
+build = [
+    "pyinstaller>=6",  # Task 3.1: packaging spike (build Windows di Windows runner — A-01/A-06)
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]

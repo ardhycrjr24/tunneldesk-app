@@ -1,0 +1,46 @@
+name: Package Windows
+
+# Task 3.1 — packaging spike: build PyInstaller Windows x64 + smoke test
+# frozen runtime. Build WAJIB di Windows runner (tanpa cross-compile,
+# A-01/A-06). Tidak menggantikan CI lint/type/test (ci.yml).
+
+on:
+  push:
+    paths:
+      - "packaging/**"
+      - "src/**"
+      - "pyproject.toml"
+      - ".github/workflows/package-windows.yml"
+  workflow_dispatch:
+
+jobs:
+  package:
+    name: PyInstaller Windows x64 + smoke test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python 3.12 (A-01)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install paket produksi + PyInstaller
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install .
+          python -m pip install "pyinstaller>=6"
+
+      - name: Build executable (PyInstaller)
+        run: pyinstaller packaging/tunneldesk.spec --noconfirm --distpath dist --workpath build/pyinstaller
+
+      - name: Frozen runtime smoke test
+        run: python packaging/smoke_test_frozen.py
+
+      - name: Upload artifact (hanya bila smoke test lulus)
+        uses: actions/upload-artifact@v4
+        with:
+          name: tunneldesk-windows-x64-${{ github.sha }}
+          path: dist/TunnelDesk/
+          if-no-files-found: error
+          retention-days: 14

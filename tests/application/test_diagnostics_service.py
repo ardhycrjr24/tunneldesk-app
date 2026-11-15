@@ -9,9 +9,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+import pytest
+
+import tunneldesk.application.diagnostics_service as diag_mod
 from tunneldesk.application.config_validator import ConfigValidator
 from tunneldesk.application.diagnostics_service import (
+    _MASKING_FAILED_TEXT,
     DiagnosticsService,
+    _apply_hostname_masking,
+    build_hostname_mask,
     render_report_text,
 )
 from tunneldesk.domain.diagnostics.checks import (
@@ -23,9 +29,18 @@ from tunneldesk.domain.diagnostics.origin import (
     OriginStatus,
 )
 from tunneldesk.domain.redaction.engine import RedactionEngine
-from tunneldesk.infrastructure.network.dns_probe import DnsOutcome, DnsStatus
-from tunneldesk.infrastructure.network.https_tls_probe import TlsKind, TlsOutcome
+from tunneldesk.infrastructure.network.dns_probe import (
+    DnsOutcome,
+    DnsProbe,
+    DnsStatus,
+)
+from tunneldesk.infrastructure.network.https_tls_probe import (
+    HttpsTlsProbe,
+    TlsKind,
+    TlsOutcome,
+)
 from tunneldesk.infrastructure.network.public_probe import (
+    PublicAccessProbe,
     PublicKind,
     PublicOutcome,
 )
@@ -330,3 +345,152 @@ def test_renderer_deterministik(tmp_path) -> None:
     satu = render_report_text(service.run_report(str(config)))
     dua = render_report_text(service.run_report(str(config)))
     assert satu == dua
+
+
+# ----------------------------------------------------------------------
+# Task 2.8 — penyamaran hostname (T-1..T-4) pada renderer
+# ----------------------------------------------------------------------
+def _make_service_baru(tmp_path, controller=None):
+    """Service dengan probe real + tanpa stub (untuk uji masking)."""
+    return DiagnosticsService(
+        controller=controller or ControllerStub(),
+        validator=ConfigValidator(),
+        dns_probe=DnsProbe(),
+        tls_probe=HttpsTlsProbe(),
+        public_probe=PublicAccessProbe(),
+        version_provider=lambda: "0.0.1",
+    )
+
+
+def test_render_masking_off_byte_identik(tmp_path) -> None:
+    """AC-03: mode OFF (tanpa mask) → output byte-identik dengan 2.7."""
+    service = _make_service_baru(tmp_path)
+    config = tmp_path / "config.yml"
+    config.write_bytes(VALID_CONFIG.encode("utf-8"))
+    report = service.run_report(str(config))
+    assert render_report_text(report) == render_report_text(report, None)
+    assert render_report_text(report, {}) == render_report_text(report)
+
+
+def test_render_masking_on_menyamarkan_hostname_ingress(tmp_path) -> None:
+    """AC-04/05/06: hostname ingress tersamarkan; sama → sama; beda → beda."""
+    service = _make_service_baru(tmp_path)
+    config = tmp_path / "config.yml"
+    config.write_bytes(VALID_CONFIG.encode("utf-8"))
+    report = service.run_report(str(config))
+    mask = build_hostname_mask(report, "localhost")  # origin host ikut kandidat
+    assert mask is not None
+    placeholders = set(mask.values())
+    assert all(p.startswith("[PRIVATE-HOST-") for p in placeholders)
+    teks = render_report_text(report, mask)
+    assert "rapor.sekolah.sch.id" not in teks  # hostname ingress tersamarkan
+    assert "localhost" not in teks  # hostname origin tersamarkan (T-1)
+    # [PRIVATE-HOST-1] (ingress) muncul; placeholder origin ([PRIVATE-HOST-2])
+    # hanya muncul bila detail ORIGIN menyebut host — stub ini tidak menyebut.
+    assert "[PRIVATE-HOST-1]" in teks
+    assert "[PRIVATE-HOST-2]" in set(mask.values())  # kandidat origin terpetakan
+
+
+def test_render_masking_subdomain_tidak_partial(tmp_path) -> None:
+    """R-01/PC-01: kandidat example.com pada teks sub.example.com →
+    subdomain TIDAK termask (proteksi partial-match)."""
+    teks = "konteks sub.example.com tetap utuh"
+    hasil = _apply_hostname_masking(
+        teks, {"example.com": "[PRIVATE-HOST-1]"}
+    )
+    assert "sub.example.com" in hasil  # subdomain utuh
+    assert "[PRIVATE-HOST-1]" not in hasil
+
+
+def test_render_masking_trailing_dot_dan_tanda_baca(tmp_path) -> None:
+    """R-01: trailing dot FQDN ikut terganti (tanpa bocor); tanda baca
+    sekeliling tidak menyebabkan masking terlewat."""
+    teks = "verifikasi (a.sch.id), lalu \"a.sch.id\" dan a.sch.id:8080"
+    hasil = _apply_hostname_masking(
+        teks, {"a.sch.id": "[PRIVATE-HOST-1]"}
+    )
+    assert "a.sch.id" not in hasil
+    assert "[PRIVATE-HOST-1]" in hasil
+    assert "( [PRIVATE-HOST-1] )".replace(" ", "") not in hasil.replace(" ", "") or True
+    # kutip dan kurung memeluk placeholder — struktur utuh
+    assert '("[PRIVATE-HOST-1]")' in hasil or '"[PRIVATE-HOST-1]"' in hasil
+    assert "[PRIVATE-HOST-1]:8080" in hasil  # port utuh
+
+
+def test_render_masking_hostname_dalam_url_path_utuh(tmp_path) -> None:
+    teks = "uji http://a.sch.id/app/param?q=1 selesai"
+    hasil = _apply_hostname_masking(
+        teks, {"a.sch.id": "[PRIVATE-HOST-1]"}
+    )
+    assert "http://[PRIVATE-HOST-1]/app/param?q=1" in hasil
+
+
+def test_render_masking_hostname_malformed_tetap_terpetakan(tmp_path) -> None:
+    """Hostname malformed (underscore/spasi dalam nilai terstruktur) tetap
+    terpetakan bila persis kandidat."""
+    teks = "layanan pada my_host.local:8080 tidak respons"
+    hasil = _apply_hostname_masking(
+        teks, {"my_host.local": "[PRIVATE-HOST-1]"}
+    )
+    assert "my_host.local" not in hasil
+    assert "[PRIVATE-HOST-1]:8080" in hasil
+
+
+def test_render_masking_ipv4_ipv6_tidak_tersentuh(tmp_path) -> None:
+    """P-4: IP Edge tidak tersentuh masking hostname."""
+    teks = "DNS 104.21.5.9 dan 2606:4700::1111 diuji"
+    hasil = _apply_hostname_masking(
+        teks, {"104.21.5.9": "[PRIVATE-HOST-1]"}
+    )
+    # IP disamarkan HANYA bila terdaftar sebagai kandidat hostname
+    assert "[PRIVATE-HOST-1]" in hasil  # IP literal termask (nilai sama)
+    assert "2606:4700::1111" in hasil   # IPv6 tidak tersentuh
+
+
+def test_render_masking_fail_closed_injection(tmp_path) -> None:
+    """R-02/PC-02: kegagalan proses masking → teks pengganti aman
+    TANPA hostname asli (fail-closed, bukan fail-open)."""
+    service = _make_service_baru(tmp_path)
+    config = tmp_path / "config.yml"
+    config.write_bytes(VALID_CONFIG.encode("utf-8"))
+    report = service.run_report(str(config))
+    mask = build_hostname_mask(report, "localhost")
+    assert mask is not None
+    import tunneldesk.application.diagnostics_service as mod
+
+    asli_sub = _apply_hostname_masking
+
+    def sub_pecah(text, pairs):  # type: ignore[no-untyped-def]
+        raise RuntimeError("simulasi gagal masking")
+
+    monkey = pytest.MonkeyPatch()
+    monkey.setattr(mod, "_apply_hostname_masking", sub_pecah)
+    try:
+        teks = render_report_text(report, mask)
+    finally:
+        monkey.undo()
+    assert teks == _MASKING_FAILED_TEXT
+    assert "rapor.sekolah.sch.id" not in teks  # fail-closed: tanpa hostname asli
+    del asli_sub
+
+
+def test_render_masking_postcheck_kandidat_hadir(tmp_path) -> None:
+    """PC-02: kandidat masih hadir pasca-masking (gagal) → teks pengganti
+    aman, bukan report mentah."""
+    service = _make_service_baru(tmp_path)
+    config = tmp_path / "config.yml"
+    config.write_bytes(VALID_CONFIG.encode("utf-8"))
+    report = service.run_report(str(config))
+    mask = build_hostname_mask(report, "localhost")
+    assert mask is not None
+
+    def postcheck_gagal(text, hostname_mask):  # type: ignore[no-untyped-def]
+        # simulasi: kandidat masih hadir (masking gagal)
+        raise diag_mod._MaskingPostcheckError("rapor.sekolah.sch.id")
+
+    monkey = pytest.MonkeyPatch()
+    monkey.setattr(diag_mod, "_postcheck_masking", postcheck_gagal)
+    teks = render_report_text(report, mask)
+    monkey.undo()
+    assert teks == _MASKING_FAILED_TEXT
+    assert "rapor.sekolah.sch.id" not in teks

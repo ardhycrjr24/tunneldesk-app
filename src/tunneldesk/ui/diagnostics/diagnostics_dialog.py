@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PySide6.QtWidgets import (
+    QCheckBox,
     QDialog,
     QFileDialog,
     QHBoxLayout,
@@ -33,8 +34,10 @@ from PySide6.QtWidgets import (
 
 from tunneldesk.application.diagnostics_service import (
     DiagnosticsService,
+    build_hostname_mask,
     render_report_text,
 )
+from tunneldesk.domain.diagnostics.checks import DiagnosticReport
 from tunneldesk.infrastructure.network.dns_probe import DnsProbe
 from tunneldesk.infrastructure.network.https_tls_probe import HttpsTlsProbe
 from tunneldesk.infrastructure.network.public_probe import PublicAccessProbe
@@ -73,7 +76,7 @@ class DiagnosticsDialog(QDialog):
         )
         self._worker: FunctionWorker | None = None
         self._report_text: str = ""
-        self.state_report: object | None = None  # DiagnosticReport (akses uji)
+        self.state_report: DiagnosticReport | None = None  # akses uji
 
         self.setWindowTitle(strings.text("diag.title"))
         self.setModal(True)
@@ -93,6 +96,13 @@ class DiagnosticsDialog(QDialog):
         self._report_view = QPlainTextEdit(self)
         self._report_view.setReadOnly(True)
         layout.addWidget(self._report_view, stretch=3)
+
+        self._mask_warning = QLabel(strings.text("diag.mask.warning"), self)
+        self._mask_warning.setWordWrap(True)
+        self._mask_warning.setVisible(False)
+
+        self._mask_checkbox = QCheckBox(strings.text("diag.mask.checkbox"), self)
+        self._mask_checkbox.setVisible(False)  # tampil setelah laporan siap
 
         buttons = QHBoxLayout()
         self._run_button = QPushButton(strings.text("diag.run"), self)
@@ -118,6 +128,8 @@ class DiagnosticsDialog(QDialog):
     def _on_run(self) -> None:
         if self.is_busy():
             return
+        # T-3/R-05: run baru selalu dimulai tanpa masking (checkbox reset OFF).
+        self._mask_checkbox.setChecked(False)
         self._status_label.setText(strings.text("diag.running"))
         self._results_view.setPlainText("")
         self._report_view.setPlainText("")
@@ -131,18 +143,40 @@ class DiagnosticsDialog(QDialog):
         # Nonaktifkan tombol SETELAH thread hidup (pola wizard Task 2.6).
         self._refresh_buttons()
 
-    def _on_report_ready(self, report: object) -> None:
+    def _on_report_ready(self, report: DiagnosticReport) -> None:
         self._worker = None
         self.state_report = report
         self._status_label.setText("")
-        # Laporan dibangun dari field yang sudah disanitasi di service.
-        self._report_text = render_report_text(report)  # type: ignore[arg-type]
+        self._mask_checkbox.setVisible(True)  # opsi "bila diminta" (T-2)
+        # Hasil langsung per kelompok (T-4: tetap asli — tanpa masking).
         hasil = report.results  # type: ignore[attr-defined]
         self._results_view.setPlainText(
             "\n".join(f"[{r.kind.value}] {r.ringkasan}" for r in hasil)
         )
-        self._report_view.setPlainText(self._report_text)
+        # Laporan dibangun dari field yang sudah disanitasi di service.
+        self._refresh_report_render()
         self._refresh_buttons()
+
+    def _refresh_report_render(self) -> None:
+        """Render ulang preview sesuai keadaan checkbox saat itu (R-05):
+        masking dinilai pada batas render/ekspor."""
+        self._report_text = self._current_report_text()
+        self._report_view.setPlainText(self._report_text)
+        self._mask_warning.setVisible(self._mask_checkbox.isChecked())
+
+    def _current_report_text(self) -> str:
+        """R-06/PC-02: SATU sumber teks untuk preview/TXT/clipboard —
+        selalu melalui render + masking fail-closed; report mentah tidak
+        pernah diekspos saat masking aktif."""
+        if self.state_report is None:
+            return ""
+        if not self._mask_checkbox.isChecked():
+            return render_report_text(self.state_report)
+        origin_host = self._settings.origin_host
+        mask = build_hostname_mask(self.state_report, origin_host)
+        if not mask:
+            return render_report_text(self.state_report)  # tanpa kandidat
+        return render_report_text(self.state_report, mask)
 
     def _on_failed(self, message: str) -> None:
         self._worker = None
@@ -158,7 +192,7 @@ class DiagnosticsDialog(QDialog):
 
     def _refresh_buttons(self) -> None:
         busy = self.is_busy()
-        ada_laporan = bool(self._report_text)
+        ada_laporan = bool(self._current_report_text())
         self._run_button.setEnabled(not busy)
         self._export_button.setEnabled(ada_laporan)  # review-first
         self._copy_button.setEnabled(ada_laporan)    # review-first
@@ -168,7 +202,8 @@ class DiagnosticsDialog(QDialog):
     # Ekspor (P-3) — TXT dan clipboard memakai representasi yang sama
     # ------------------------------------------------------------------
     def _on_export(self) -> None:
-        if not self._report_text:
+        isi = self._current_report_text()
+        if not isi:
             return
         path, _filter = QFileDialog.getSaveFileName(
             self,
@@ -179,7 +214,7 @@ class DiagnosticsDialog(QDialog):
         if not path:
             return
         try:
-            Path(path).write_text(self._report_text, encoding="utf-8")
+            Path(path).write_text(isi, encoding="utf-8")
         except OSError as exc:
             # Gagal ekspor ditangani dengan pesan aman; hasil tidak hilang.
             QMessageBox.warning(
@@ -193,14 +228,15 @@ class DiagnosticsDialog(QDialog):
         )
 
     def _on_copy(self) -> None:
-        if not self._report_text:
+        isi = self._current_report_text()
+        if not isi:
             return
         try:
             from PySide6.QtWidgets import QApplication
 
             clipboard = QApplication.clipboard()
             if clipboard is not None:
-                clipboard.setText(self._report_text)
+                clipboard.setText(isi)
             self._status_label.setText(strings.text("diag.copy_ok"))
         except Exception as exc:  # noqa: BLE001 — pesan aman (R-3 pola)
             QMessageBox.warning(

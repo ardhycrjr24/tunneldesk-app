@@ -156,6 +156,10 @@ ID: dict[str, str] = {
     "diag.copy_failed": "Penyalinan gagal: {detail}",
     "diag.close_busy": "Pemeriksaan sedang berjalan — tunggu hingga selesai.",
     "diag.err.failed": "Diagnostik gagal: {detail}",
+    "diag.mask.checkbox": "Sembunyikan hostname (privat)",
+    "diag.mask.warning": "Masking hostname tidak menyamarkan seluruh "
+    "informasi jaringan. IP Cloudflare Edge dan informasi sertifikat "
+    "publik masih dapat terlihat dalam laporan.",
 }
 
 

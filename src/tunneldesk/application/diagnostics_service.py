@@ -25,6 +25,7 @@ Ketegasan arsitektur:
 
 from __future__ import annotations
 
+import re
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -467,10 +468,15 @@ class DiagnosticsService:
             return _FALLBACK_VERSION
 
 
-def render_report_text(report: DiagnosticReport) -> str:
-    """Render laporan → teks kanonik untuk preview, TXT, dan clipboard
-    (representasi SAMA untuk ketiganya — AC-08). Hanya memakai field
-    yang sudah disanitasi di service."""
+def _norm_hostname(hostname: str) -> str:
+    """Normalisasi perbandingan hostname: strip, tanpa trailing-dot root,
+    lowercase (R-1b/PC-01 — dokumen perbandingan eksplisit)."""
+    return hostname.strip().rstrip(".").lower()
+
+
+def _render_lines(report: DiagnosticReport) -> list[str]:
+    """Bangun baris laporan (badan renderer 2.7 asli — jalur OFF tetap
+    byte-identik)."""
     baris: list[str] = [
         "LAPORAN DIAGNOSTIK TUNNELDESK",
         f"Waktu: {report.dibuat_iso}",
@@ -501,4 +507,108 @@ def render_report_text(report: DiagnosticReport) -> str:
             for sub in hasil.detail.splitlines():
                 baris.append(f"    {sub}")
         baris.append("")
-    return "\n".join(baris).rstrip() + "\n"
+    return baris
+
+
+def render_report_text(
+    report: DiagnosticReport,
+    hostname_mask: dict[str, str] | None = None,
+) -> str:
+    """Render laporan → teks kanonik untuk preview, TXT, dan clipboard
+    (representasi SAMA untuk ketiganya — AC-08). Hanya memakai field
+    yang sudah disanitasi di service.
+
+    ``hostname_mask`` (Task 2.8, T-1/T-2): mapping hostname ternormalisasi
+    → placeholder ``[PRIVATE-HOST-n]`` dari
+    ``build_hostname_mask``. ``None``/kosong → jalur 2.7 asli
+    **byte-identik** (AC-03). Masking bersifat fail-closed (R-02/PC-02):
+    kegagalan apa pun → teks pengganti aman **tanpa hostname asli** —
+    tanpa fallback ke report mentah.
+    """
+    if not hostname_mask:
+        return "\n".join(_render_lines(report)).rstrip() + "\n"
+    try:
+        teks = "\n".join(_render_lines(report)).rstrip() + "\n"
+        teks = _apply_hostname_masking(teks, hostname_mask)
+        _postcheck_masking(teks, hostname_mask)
+        return teks
+    except Exception:  # noqa: BLE001 — fail-closed (R-02): tanpa hostname asli
+        return _MASKING_FAILED_TEXT
+
+
+def _apply_hostname_masking(
+    text: str, hostname_mask: dict[str, str]
+) -> str:
+    """Substitusi hostname kandidat → placeholder (longest-first,
+    case-insensitive, boundary-guard R-01/PC-01: trailing dot diizinkan
+    ikut terganti; partial-match/subdomain terlindungi)."""
+    pasangan = sorted(
+        hostname_mask.items(), key=lambda kv: -len(kv[0])
+    )
+    for asli, placeholder in pasangan:
+        pola = re.compile(
+            r"(?<![\w.-])" + re.escape(asli) + r"(?![\w-])",
+            re.IGNORECASE,
+        )
+        text = pola.sub(placeholder, text)
+    return text
+
+
+def _postcheck_masking(text: str, hostname_mask: dict[str, str]) -> None:
+    """Post-check (PC-02): setiap kandidat TIDAK boleh hadir pada teks
+    final (placeholder dihapus dulu). Hadir → raise → fail-closed."""
+    teks_tanpa_placeholder = _PLACEHOLDER_RE.sub("", text).lower()
+    for kunci in hostname_mask:
+        if kunci in teks_tanpa_placeholder:
+            raise _MaskingPostcheckError(kunci)
+
+
+class _MaskingPostcheckError(Exception):
+    """Kandidat masih hadir pasca-masking — pemicu fail-closed."""
+
+
+_MASKING_FAILED_TEXT = "[LAPORAN DISENSOR — kesalahan penyamaran internal]"
+_PLACEHOLDER_RE = re.compile(r"\[\s*PRIVATE-HOST[^\]\n]*\]")
+
+
+def build_hostname_mask(
+    report: DiagnosticReport, origin_host: str
+) -> dict[str, str] | None:
+    """Bangun mapping hostname → placeholder ``[PRIVATE-HOST-n]`` (T-1).
+
+    Kandidat = semua hostname ingress (dari ``CheckResult.hostname``,
+    urutan hasil) + origin host (bila belum terdaftar). Nomor placeholder
+    mengikuti urutan kemunculan pertama; hostname sama → placeholder sama;
+    berbeda → berbeda. Namespace dipilih **sekali per laporan sebelum
+    substitusi** (PC-04): collision `[PRIVATE-HOST-n]` dengan teks asli →
+    sufiks ``-ALT`` iteratif. ``None`` bila tidak ada kandidat.
+    """
+    teks_dasar = render_report_text(report)  # jalur tanpa mask (deteksi collision)
+    kandidat: list[str] = []
+    terlihat: set[str] = set()
+    for hasil in report.results:
+        if hasil.hostname and hasil.hostname.strip():
+            kunci = _norm_hostname(hasil.hostname)
+            if kunci not in terlihat:
+                terlihat.add(kunci)
+                kandidat.append(hasil.hostname.strip())
+    origin = origin_host.strip() if isinstance(origin_host, str) else ""
+    if origin and _norm_hostname(origin) not in terlihat:
+        kandidat.append(origin)
+    if not kandidat:
+        return None
+
+    # PC-04: namespace dipilih sekali per laporan sebelum substitusi —
+    # urutan: polos → ALT → ALT2 → ALT3 (bila terus collision).
+    for label in ("", "ALT", "ALT2", "ALT3"):
+        prefix = f"[PRIVATE-HOST-{label}-" if label else "[PRIVATE-HOST-"
+        mapping: dict[str, str] = {}
+        bentrok = False
+        for nomor, asli in enumerate(kandidat, start=1):
+            placeholder = f"{prefix}{nomor}]"
+            mapping[_norm_hostname(asli)] = placeholder
+            if placeholder in teks_dasar:
+                bentrok = True
+        if not bentrok:
+            return mapping
+    return mapping

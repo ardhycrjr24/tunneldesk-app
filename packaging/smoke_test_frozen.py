@@ -21,6 +21,7 @@ Windows-only: panggil hanya di sys.platform == "win32".
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -56,15 +57,10 @@ def snapshot_dir(root: Path) -> dict[str, int]:
 
 
 def secret_markers() -> list[str]:
-    """String secret dummy dari fixture F6 + pola kunci generik."""
+    """String secret dummy dari fixture F6 (literal unik, aman dicari byte)."""
     markers = [
         "DUMMY_ACCOUNT_TAG_",
         "DUMMY_TUNNEL_SECRET_",
-        "BEGIN OPENSSH PRIVATE KEY",
-        "BEGIN RSA PRIVATE KEY",
-        "BEGIN EC PRIVATE KEY",
-        "BEGIN PRIVATE KEY",
-        "BEGIN CERTIFICATE-----",
     ]
     fixture = REPO_ROOT / "tests" / "fixtures" / "F6" / "credentials-dummy.json"
     if fixture.exists():
@@ -76,8 +72,18 @@ def secret_markers() -> list[str]:
     return [m for m in markers if m]
 
 
+# Blok PEM utuh (header + body base64 + footer) = material kunci/sertifikat
+# sungguhan. Header PEM SAJA ("BEGIN PRIVATE KEY" sebagai literal) juga ada
+# di dalam library TLS Qt (parser sertifikat terkompilasi) dan BUKAN secret.
+PEM_BLOCK = re.compile(
+    rb"-----BEGIN [A-Z0-9 ]*(PRIVATE KEY|CERTIFICATE)-----"
+    rb"[A-Za-z0-9+/=\r\n]{100,}"
+    rb"-----END [A-Z0-9 ]*(PRIVATE KEY|CERTIFICATE)-----"
+)
+
+
 def scan_secrets() -> list[str]:
-    """Pindai seluruh file artifact untuk marker secret/ekstensi sensitif."""
+    """Pindai seluruh file artifact untuk material secret sungguhan."""
     findings: list[str] = []
     markers = secret_markers()
     for path in DIST_APP.rglob("*"):
@@ -91,6 +97,8 @@ def scan_secrets() -> list[str]:
         for marker in markers:
             if marker.encode("utf-8") in data:
                 findings.append(f"string '{marker[:40]}' di {path.name}")
+        if PEM_BLOCK.search(data):
+            findings.append(f"blok PEM utuh di {path.name}")
     return findings
 
 
